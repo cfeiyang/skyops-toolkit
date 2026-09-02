@@ -3,42 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
-from setup_project import project_root
+from simulations.common import (
+    NamedConfig,
+    OutputConfig,
+    PathsConfig,
+    STKConfig,
+    SatelliteConfig,
+    ScenarioConfig,
+)
 from simulations.global_coverage.templates import StationConfig, station_template
-
-
-@dataclass
-class PathsConfig:
-    repo_root: Path
-    data_dir: Path
-    result_dir: Path
-
-
-@dataclass
-class STKConfig:
-    mode: str = "new"
-
-
-@dataclass
-class ScenarioConfig:
-    name: str = "GlobalCoverage"
-    start_time: str = "1 Sep 2026 00:00:00.000"
-    stop_time: str = "2 Sep 2026 00:00:00.000"
-
-
-@dataclass
-class SatelliteConfig:
-    name: str
-    ssc: int
-    step: float
-    tle_file: Path
-
-
-@dataclass
-class NamedConfig:
-    name: str
 
 
 @dataclass
@@ -56,11 +30,6 @@ class CoverageConfig(NamedConfig):
 @dataclass
 class FomConfig(NamedConfig):
     min_assets: int = 1
-
-
-@dataclass
-class OutputConfig:
-    image_name: str = ""
 
 
 @dataclass
@@ -101,16 +70,11 @@ class GlobalCoverageConfig:
 
 
 def config_global_coverage() -> GlobalCoverageConfig:
-    root = project_root()
-    paths = PathsConfig(
-        repo_root=root,
-        data_dir=root / "data",
-        result_dir=root / "results" / "global_coverage",
-    )
+    paths = PathsConfig.for_simulation("global_coverage")
     return GlobalCoverageConfig(
         paths=paths,
         stk=STKConfig(mode="new"),
-        scenario=ScenarioConfig(),
+        scenario=ScenarioConfig(name="GlobalCoverage"),
         satellite=SatelliteConfig(
             name="TN01A",
             ssc=59705,

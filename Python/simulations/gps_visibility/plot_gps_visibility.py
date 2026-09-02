@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 
-from simulations.global_coverage.plot_global_coverage import (
-    configure_chinese_font,
-)
+from utils.plotting import configure_chinese_font
 
 
 def plot_gps_visibility(result, config, axes=None):
@@ -16,6 +14,7 @@ def plot_gps_visibility(result, config, axes=None):
         _, axes = plt.subplots(figsize=(12, 6), facecolor="white")
     else:
         axes.clear()
+    axes.set_axis_on()
 
     data = result.gps_count_data
     axes.step(

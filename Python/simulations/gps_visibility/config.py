@@ -3,36 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-from setup_project import project_root
-
-
-@dataclass
-class PathsConfig:
-    repo_root: Path
-    data_dir: Path
-    result_dir: Path
-
-
-@dataclass
-class STKConfig:
-    mode: str = "new"
-
-
-@dataclass
-class ScenarioConfig:
-    name: str = "GPSVisibility"
-    start_time: str = "1 Sep 2026 00:00:00.000"
-    stop_time: str = "2 Sep 2026 00:00:00.000"
-
-
-@dataclass
-class SatelliteConfig:
-    name: str
-    ssc: int
-    step: float
-    tle_file: Path
+from simulations.common import (
+    NamedConfig,
+    OutputConfig,
+    PathsConfig,
+    STKConfig,
+    SatelliteConfig,
+    ScenarioConfig,
+)
 
 
 @dataclass
@@ -50,18 +29,8 @@ class ReceiverConfig:
 
 
 @dataclass
-class NamedConfig:
-    name: str
-
-
-@dataclass
 class AnalysisConfig:
     step: float = 60.0
-
-
-@dataclass
-class OutputConfig:
-    image_name: str = ""
 
 
 @dataclass
@@ -84,16 +53,11 @@ class GPSVisibilityConfig:
 
 
 def config_gps_visibility() -> GPSVisibilityConfig:
-    root = project_root()
-    paths = PathsConfig(
-        repo_root=root,
-        data_dir=root / "data",
-        result_dir=root / "results" / "gps_visibility",
-    )
+    paths = PathsConfig.for_simulation("gps_visibility")
     return GPSVisibilityConfig(
         paths=paths,
         stk=STKConfig(mode="new"),
-        scenario=ScenarioConfig(),
+        scenario=ScenarioConfig(name="GPSVisibility"),
         satellite=SatelliteConfig(
             name="TN01A",
             ssc=59705,

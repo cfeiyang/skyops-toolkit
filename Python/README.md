@@ -53,12 +53,22 @@ python simulations/global_coverage/run.py
 python simulations/gps_visibility/run.py
 ```
 
+## 界面与执行方式
+
+桌面界面使用 Python 自带的 `tkinter/ttk`，不需要额外安装 Qt。参数区和结果区可拖动调整宽度；结果区提供 Matplotlib 的缩放、平移和图片保存工具栏。STK 计算在固定工作线程执行，窗口在计算期间仍可正常刷新。
+
+计算与绘图相互独立：
+
+- `compute_global_coverage` / `compute_gps_visibility`：只操作 STK 并返回数值结果。
+- `render_global_coverage` / `render_gps_visibility`：只负责绘图和保存。
+- `run_global_coverage` / `run_gps_visibility`：供命令行使用的完整入口。
+
 ## 目录
 
 ```text
-app/            tkinter GUI 和参数面板
+app/            tkinter/ttk GUI、异步执行和公共界面组件
 simulations/    两个仿真的配置、业务流程和绘图
 stk_api/        STK 12.6 Object Model 公共封装
-utils/          通用数值工具
+utils/          通用数值和绘图工具
 setup_project.py  Python 路径入口
 ```
