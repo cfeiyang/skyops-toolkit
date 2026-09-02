@@ -1,0 +1,29 @@
+# ============================================================
+# MATLAB 工程 .gitignore
+# ============================================================
+
+# ---- MATLAB 自动生成 / 临时文件 ----
+*.asv              # MATLAB 编辑器自动保存
+*.m~               # 旧式备份
+*.bak
+*.mexw64           # Windows 64 位 mex 二进制
+*.mlappinstall
+*.mlpkginstall
+*.fig
+*.slxc
+.slprj/
+
+# ---- 输入数据：TLE 等（不上传）----
+data/
+*.tle
+*.txt
+
+results/
+*.csv
+*.png
+*.mat
+
+# ---- 系统 / 编辑器 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
