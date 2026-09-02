@@ -1,19 +1,19 @@
 # 卫星通信仿真工程
 
-基于 MATLAB 与 STK 12.6 COM Object Model 的卫星通信仿真工程。
+基于 MATLAB / Python 与 STK 12.6 Object Model 的卫星通信仿真工程。
+
+- `MATLAB/`：已验证的 MATLAB 实现。
+- `Python/`：Python 3.10 与 STK 12.6 官方 `agi.stk12` API 实现。
 
 ## 目录
 
 ```text
-app/            两个独立GUI及其参数面板
-simulations/    正式仿真场景
-stk_api/        可复用的STK 12.6公共封装
-utils/          MATLAB通用工具
-data/           TLE等输入数据
-results/        图片结果
-setupProject.m  路径入口
-仿真场景.docx   场景需求
+MATLAB/         MATLAB 实现
+Python/         Python 3.10 实现
 ```
+
+MATLAB 使用前请先进入 `MATLAB/` 并执行 `setupProject`。
+Python 的环境与运行说明见 `Python/README.md`。
 
 ## 仿真一：全球通信时长
 

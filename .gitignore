@@ -16,12 +16,17 @@
 # ---- 输入数据：TLE 等（不上传）----
 MATLAB/data/
 *.tle
-*.txt
 
 MATLAB/results/
+Python/data/
+Python/results/
 *.csv
 *.png
 *.mat
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
 
 # ---- 系统 / 编辑器 ----
 Thumbs.db
