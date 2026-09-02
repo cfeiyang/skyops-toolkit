@@ -14,11 +14,11 @@
 .slprj/
 
 # ---- 输入数据：TLE 等（不上传）----
-data/
+MATLAB/data/
 *.tle
 *.txt
 
-results/
+MATLAB/results/
 *.csv
 *.png
 *.mat
