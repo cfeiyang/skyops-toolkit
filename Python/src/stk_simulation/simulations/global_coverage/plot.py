@@ -144,7 +144,7 @@ def plot_global_coverage(result, config, axes=None):
         filled, ax=axes, orientation="vertical", fraction=0.03, pad=0.02
     )
     colorbar.set_ticks(levels)
-    colorbar.set_label("通信时长 / h")
+    colorbar.set_label(plot.colorbar_label)
     axes._stk_colorbar = colorbar  # type: ignore[attr-defined]
     if plot.title:
         axes.set_title(plot.title, fontweight="normal")

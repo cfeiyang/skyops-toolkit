@@ -1,9 +1,9 @@
-"""全球覆盖场景的卫星和地面站模板。"""
+"""仿真场景文档规定的卫星和地面站模板。"""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 
 from stk_simulation.utils.geo import dms2dd
 
@@ -55,69 +55,92 @@ def station_template(mode: str) -> list[StationConfig]:
             min_elevation=15,
         ),
         StationConfig(
-            name="WenChang",
-            lat=19.6143,
-            lon=110.9511,
+            name="HaiNan",
+            lat=19.94,
+            lon=109.57,
+            alt=0,
+            min_elevation=15,
+        ),
+        StationConfig(
+            name="Mexico",
+            lat=23.39,
+            lon=-102.05,
             alt=0,
             min_elevation=15,
         ),
     ]
 
-    counts = {"single": 1, "two": 2, "three": 3, "four": 4}
+    counts = {"single": 1, "domestic": 4, "all": 5}
     try:
         count = counts[str(mode)]
     except KeyError as error:
         raise ValueError(
-            "station_template: mode 必须是 single、two、three 或 four。"
+            "station_template: mode 必须是 single、domestic 或 all。"
         ) from error
-    return deepcopy(stations[:count])
+    return stations[:count]
 
 
-def satellite_template(mode: str) -> list[SatelliteElements]:
-    mean_motion = 2.00562166 * 360.0 / 86400.0
-    satellites = [
+def satellites_from_reference_tle(
+    tle_file: str | Path,
+    reference_ssc: int,
+    reference_name: str,
+    step: float,
+) -> list[SatelliteElements]:
+    """读取参考星 TLE，并按文档的 RAAN/M 偏置生成三星根数。"""
+    reference = _read_tle_elements(tle_file, reference_ssc, reference_name, step)
+    definitions = (
+        (reference_name, reference_ssc, 0.0, 0.0),
+        ("TN02A", 90002, 45.0, -90.0),
+        ("TN03A", 90003, 90.0, -180.0),
+    )
+    return [
         SatelliteElements(
-            name="TN01A",
-            ssc=59705,
-            step=60,
-            epoch=26242.91536755,
-            mean_motion=mean_motion,
-            eccentricity=0.0028567,
-            inclination=53.1278,
-            arg_perigee=203.6024,
-            raan=167.5041,
-            mean_anomaly=156.2820,
-        ),
-        SatelliteElements(
-            name="TN02A",
-            ssc=90002,
-            step=60,
-            epoch=26242.91536755,
-            mean_motion=mean_motion,
-            eccentricity=0.0028567,
-            inclination=53.1278,
-            arg_perigee=203.6024,
-            raan=212.5041,
-            mean_anomaly=66.2820,
-        ),
-        SatelliteElements(
-            name="TN03A",
-            ssc=90003,
-            step=60,
-            epoch=26242.91536755,
-            mean_motion=mean_motion,
-            eccentricity=0.0028567,
-            inclination=53.1278,
-            arg_perigee=203.6024,
-            raan=257.5041,
-            mean_anomaly=336.2820,
-        ),
+            name=name,
+            ssc=ssc,
+            step=reference.step,
+            epoch=reference.epoch,
+            mean_motion=reference.mean_motion,
+            eccentricity=reference.eccentricity,
+            inclination=reference.inclination,
+            arg_perigee=reference.arg_perigee,
+            raan=(reference.raan + raan_offset) % 360.0,
+            mean_anomaly=(reference.mean_anomaly + anomaly_offset) % 360.0,
+        )
+        for name, ssc, raan_offset, anomaly_offset in definitions
     ]
 
-    if mode == "single":
-        count = 1
-    elif mode == "multi":
-        count = 3
-    else:
-        raise ValueError("satellite_template: mode 必须是 single 或 multi。")
-    return deepcopy(satellites[:count])
+
+def _read_tle_elements(
+    tle_file: str | Path,
+    ssc: int,
+    name: str,
+    step: float,
+) -> SatelliteElements:
+    path = Path(tle_file)
+    if not path.is_file():
+        raise FileNotFoundError(f"TLE 文件不存在：{path}")
+
+    lines = [line.rstrip() for line in path.read_text(encoding="utf-8-sig").splitlines()]
+    target = str(ssc)
+    for index, line1 in enumerate(lines[:-1]):
+        if not line1.startswith("1 ") or line1[2:7].strip() != target:
+            continue
+        line2 = lines[index + 1]
+        if not line2.startswith("2 ") or line2[2:7].strip() != target:
+            continue
+        try:
+            return SatelliteElements(
+                name=name,
+                ssc=ssc,
+                step=step,
+                epoch=float(line1[18:32]),
+                inclination=float(line2[8:16]),
+                raan=float(line2[17:25]),
+                eccentricity=float(f"0.{line2[26:33].strip()}"),
+                arg_perigee=float(line2[34:42]),
+                mean_anomaly=float(line2[43:51]),
+                mean_motion=float(line2[52:63]) * 360.0 / 86400.0,
+            )
+        except (ValueError, IndexError) as error:
+            raise ValueError(f"TLE 中 SSC={ssc} 的轨道根数格式无效：{path}") from error
+    raise ValueError(f"TLE 中没有找到 SSC={ssc} 的两行根数：{path}")

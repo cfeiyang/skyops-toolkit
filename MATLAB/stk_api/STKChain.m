@@ -23,35 +23,6 @@ methods (Static)
     
     end
 
-% 读取两节点 Chain 的同时 Access 数量
-    function result = readNumberOfAccesses(chain, scenario, step)
-    % GPSTxConstellation -> GPS_Rx
-    % Number Of Accesses 当前时刻满足完整链路条件的 GPS 数量
-    
-        % Base Object Data
-        dp = chain.DataProviders.Item('Base Object Data');
-    
-        data = dp.Exec(scenario.StartTime, scenario.StopTime, step);
-        time = data.DataSets.GetDataSetByName('Time').GetValues;
-        count = data.DataSets.GetDataSetByName('Number Of Accesses').GetValues;
-    
-        if iscell(count)
-            count = cell2mat(count);
-        end
-    
-        %Access Objects
-        accessObjects = data.DataSets.GetDataSetByName('Access Objects').GetValues;
-        
-        %转为从仿真开始算起的小时数
-        elapsedHour = (0:numel(count) - 1)' * step / 3600;
-    
-        %Table
-        result = table(time(:), elapsedHour(:), count(:), accessObjects(:), ...
-            'VariableNames', {'Time', 'ElapsedHour', 'AccessCount', 'AccessObjects'});
-    
-    end
-
-
     % Ground -> Satellite Chain
     function chain = createSatGroundChain( scenario, name, groundNode, satellite)
     % 单站：

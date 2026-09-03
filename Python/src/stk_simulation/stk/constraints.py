@@ -21,13 +21,13 @@ class STKConstraints:
         )
 
     @staticmethod
-    def set_receiver_sensitivity(receiver, sensitivity: float) -> None:
-        constraint = receiver.AccessConstraints.AddConstraint(
-            AgEAccessConstraints.eCstrPowerAtReceiverInput
+    def set_sun_exclusion(stk_object, angle_deg: float) -> None:
+        """设置视线与太阳方向的最小夹角，用于太阳干扰规避。"""
+        constraint = stk_object.AccessConstraints.AddConstraint(
+            AgEAccessConstraints.eCstrLOSSunExclusion
         )
-        constraint.EnableMin = True
-        constraint.Min = sensitivity
+        constraint.Angle = angle_deg
         print(
-            f"[接收机约束] {instance_name(receiver)} "
-            f"Power at Receiver Input >= {sensitivity:.3f} dBW"
+            f"[干扰规避] {instance_name(stk_object)} "
+            f"LOS Sun Exclusion = {angle_deg:.1f} deg"
         )

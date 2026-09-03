@@ -26,6 +26,7 @@ Python/results/
 
 # ---- Python 缓存 ----
 __pycache__/
+.mypy_cache/
 *.py[cod]
 Python/build/
 Python/dist/

@@ -1,4 +1,4 @@
-"""STK Facility、Satellite、Transmitter、Receiver 和 Constellation 创建。"""
+"""STK Facility、Satellite 和 Constellation 创建。"""
 
 from __future__ import annotations
 
@@ -99,40 +99,6 @@ class STKObjects:
         return group
 
     @staticmethod
-    def create_satellite_group(scenario, name: str, satellites: list[Any]):
-        if not satellites:
-            raise ValueError("STKObjects.create_satellite_group: satellites 不能为空。")
-        if len(satellites) == 1:
-            print(f"[卫星组] Single satellite: {instance_name(satellites[0])}")
-            return satellites[0]
-
-        group = STKObjects.create_constellation(scenario, name, satellites)
-        print(f"[卫星组] 成功创建 {len(satellites)} satellites, logic = ANY OF")
-        return group
-
-    @staticmethod
-    def create_transmitter(parent, name: str):
-        transmitter = parent.Children.New(AgESTKObjectType.eTransmitter, name)
-        transmitter.SetModel("Simple Transmitter Model")
-        return transmitter
-
-    @staticmethod
-    def create_receiver(parent, name: str):
-        receiver = parent.Children.New(AgESTKObjectType.eReceiver, name)
-        receiver.SetModel("Simple Receiver Model")
-        print(f"[接收机] 成功创建 Receiver: {instance_name(parent)}/{name}")
-        return receiver
-
-    @staticmethod
-    def load_gps_constellation(root, scenario):
-        print("[GPS] 正在加载 STK 内置 GPS Constellation...")
-        root.ExecuteCommand("LoadGPSConstellation *")
-        constellations = scenario.Children.GetElements(AgESTKObjectType.eConstellation)
-        gps_constellation = constellations.GetItemByName("GPSConstellation")
-        print("[GPS] GPSConstellation 加载完成。")
-        return gps_constellation
-
-    @staticmethod
     def create_constellation(scenario, name: str, objects: list[Any]):
         if not objects:
             raise ValueError("STKObjects.create_constellation: objects 不能为空。")
@@ -142,18 +108,6 @@ class STKObjects:
             constellation.Objects.AddObject(stk_object)
         print(f"[星座] 成功创建 Constellation: {name}，对象数量={len(objects)}")
         return constellation
-
-    @staticmethod
-    def get_gps_satellites(scenario) -> list[Any]:
-        satellites = scenario.Children.GetElements(AgESTKObjectType.eSatellite)
-        gps_satellites: list[Any] = []
-        for index in range(satellites.Count):
-            satellite = satellites.Item(index)
-            if instance_name(satellite).lower().startswith("gps-"):
-                gps_satellites.append(satellite)
-
-        print(f"[GPS] 找到 GPS Satellite 数量：{len(gps_satellites)}")
-        return gps_satellites
 
     @staticmethod
     def _set_full_ground_track(satellite) -> None:

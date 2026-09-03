@@ -32,23 +32,6 @@ QMainWindow, QWidget {
 #connectionStatus, #statusLabel, #hintLabel {
     color: #667085;
 }
-#navigation {
-    background: white;
-    border: 1px solid #dce2ea;
-    border-radius: 8px;
-    padding: 8px;
-    font-size: 15px;
-}
-#navigation::item {
-    min-height: 42px;
-    padding-left: 12px;
-    border-radius: 5px;
-}
-#navigation::item:selected {
-    background: #dcecff;
-    color: #174f8f;
-    font-weight: 600;
-}
 QGroupBox {
     background: white;
     border: 1px solid #dce2ea;
@@ -97,7 +80,7 @@ QPushButton:hover {
 
 def run_application() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("STKSimulation")
+    app.setApplicationName("STK 全球覆盖通信时长仿真")
     app.setStyle("Fusion")
     font_name = configure_chinese_font()
     app.setFont(QFont(font_name, 10))
@@ -105,4 +88,3 @@ def run_application() -> int:
     window = MainWindow()
     window.show()
     return app.exec()
-

@@ -1,14 +1,12 @@
-"""STK Chain 创建与结果读取。"""
+"""STK Chain 创建。"""
 
 from __future__ import annotations
 
+from itertools import permutations
 from typing import Any
-
-import numpy as np
-import pandas as pd
 from agi.stk12.stkobjects import AgESTKObjectType
 
-from stk_simulation.stk.data import dataset_values, numeric_dataset
+from stk_simulation.stk.data import instance_name
 
 
 class STKChain:
@@ -25,36 +23,43 @@ class STKChain:
         return chain
 
     @staticmethod
-    def read_number_of_accesses(chain, scenario, step: float) -> pd.DataFrame:
-        provider = chain.DataProviders.Item("Base Object Data")
-        result = provider.Exec(scenario.StartTime, scenario.StopTime, step)
-
-        times = dataset_values(result, "Time")
-        counts = numeric_dataset(result, "Number Of Accesses")
-        access_objects = dataset_values(result, "Access Objects")
-        elapsed_hours = np.arange(counts.size, dtype=float) * step / 3600.0
-
-        return pd.DataFrame(
-            {
-                "Time": times,
-                "ElapsedHour": elapsed_hours,
-                "AccessCount": counts,
-                "AccessObjects": access_objects,
-            }
-        )
-
-    @staticmethod
     def create_sat_ground_chain(scenario, name: str, ground_node, satellite):
         chain = STKChain.create_chain(scenario, name, ground_node, satellite)
         print("[建链] Coverage Asset Mode = APPEND (STK 12.6 default)")
         return chain
 
     @staticmethod
-    def create_sat_ground_chain_with_isl(
-        scenario, name: str, ground_node, sat_up_node, sat_down_node
-    ):
-        chain = STKChain.create_chain(
-            scenario, name, ground_node, sat_up_node, sat_down_node
+    def create_satellite_network_chains(
+        scenario, base_name: str, ground_node, satellites: list[Any]
+    ) -> list[Any]:
+        """创建三星直达路径和两两几何星间中继路径。"""
+        if len(satellites) < 2:
+            raise ValueError("星间网络至少需要两颗卫星。")
+
+        chains = [
+            STKChain.create_chain(
+                scenario,
+                f"{base_name}_Direct_{instance_name(satellite)}",
+                ground_node,
+                satellite,
+            )
+            for satellite in satellites
+        ]
+        for sat_up, sat_down in permutations(satellites, 2):
+            chains.append(
+                STKChain.create_chain(
+                    scenario,
+                    (
+                        f"{base_name}_Relay_{instance_name(sat_up)}"
+                        f"_To_{instance_name(sat_down)}"
+                    ),
+                    ground_node,
+                    sat_up,
+                    sat_down,
+                )
+            )
+        print(
+            f"[星间通信] 已创建 {len(satellites)} 条直达链和 "
+            f"{len(satellites) * (len(satellites) - 1)} 条几何中继链"
         )
-        print(f"[建链] Chain created (星间中继): {name}")
-        return chain
+        return chains

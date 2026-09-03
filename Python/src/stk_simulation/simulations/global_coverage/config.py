@@ -19,8 +19,14 @@ from stk_simulation.simulations.global_coverage.presets import (
 
 
 @dataclass
-class SatelliteGroupConfig(NamedConfig):
-    mode: str = "single"
+class SatelliteGroupConfig:
+    mode: str = "multi"
+
+
+@dataclass
+class InterferenceAvoidanceConfig:
+    enabled: bool = False
+    angle: float = 15.0
 
 
 @dataclass
@@ -54,6 +60,7 @@ class GlobalPlotConfig:
         default_factory=lambda: ["-80", "-60", "-40", "-20", "0", "20", "40", "60", "80"]
     )
     title: str = ""
+    colorbar_label: str = "通信时长 / h"
 
 
 @dataclass
@@ -63,6 +70,7 @@ class GlobalCoverageConfig:
     scenario: ScenarioConfig
     satellite: SatelliteConfig
     satellite_group: SatelliteGroupConfig
+    interference: InterferenceAvoidanceConfig
     stations: list[StationConfig]
     ground_group: NamedConfig
     chain: NamedConfig
@@ -84,8 +92,9 @@ def config_global_coverage() -> GlobalCoverageConfig:
             step=60,
             tle_file=paths.data_dir / "TN1A_TLE_20260830.txt",
         ),
-        satellite_group=SatelliteGroupConfig(name="SatelliteGroup", mode="single"),
-        stations=station_template("single"),
+        satellite_group=SatelliteGroupConfig(mode="multi"),
+        interference=InterferenceAvoidanceConfig(),
+        stations=station_template("all"),
         ground_group=NamedConfig(name="GroundStations"),
         chain=NamedConfig(name="CommChain"),
         coverage=CoverageConfig(name="GlobalCoverage"),

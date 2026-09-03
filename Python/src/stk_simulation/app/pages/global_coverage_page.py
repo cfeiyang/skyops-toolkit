@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -17,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -30,35 +34,36 @@ from stk_simulation.app.widgets.plot_widget import PlotWidget
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.presets import (
     StationConfig,
-    satellite_template,
     station_template,
 )
 
 
-SATELLITE_MODES = (("单星", "single"), ("三星", "multi"))
+SATELLITE_MODES = (("单星", "single"), ("三星几何星间中继", "multi"))
 STATION_PRESETS = (
-    ("单站", "single"),
-    ("双站", "two"),
-    ("三站", "three"),
-    ("四站", "four"),
+    ("上海临港单站", "single"),
+    ("四个国内基本站", "domestic"),
+    ("五站（含墨西哥）", "all"),
 )
 
 
 class GlobalCoveragePage(QWidget):
     run_requested = Signal(object, bool)
 
-    def __init__(self, config: GlobalCoverageConfig, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, config: GlobalCoverageConfig, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self._config = copy.deepcopy(config)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_general_tab(), "仿真设置")
+        self.tabs.addTab(self._build_scenario_tab(), "场景与覆盖")
+        self.tabs.addTab(self._build_satellite_tab(), "卫星与链路")
         self.tabs.addTab(self._build_station_tab(), "地面站配置")
 
         self.run_button = QPushButton("开始仿真")
         self.run_button.setObjectName("primaryButton")
         self.run_button.clicked.connect(lambda: self._request_run(False))
-        self.run_all_button = QPushButton("运行预设 8 组")
+        self.run_all_button = QPushButton("运行文档全部方案")
         self.run_all_button.clicked.connect(lambda: self._request_run(True))
         self.status_label = QLabel("就绪")
         self.status_label.setObjectName("statusLabel")
@@ -81,14 +86,14 @@ class GlobalCoveragePage(QWidget):
         splitter.addWidget(self.plot_widget)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([300, 560])
+        splitter.setSizes([320, 560])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
         self.write_config(config)
 
-    def _build_general_tab(self) -> QWidget:
+    def _build_scenario_tab(self) -> QWidget:
         tab = QWidget()
         self.scenario_field = QLineEdit()
         self.start_field = QLineEdit()
@@ -100,26 +105,81 @@ class GlobalCoveragePage(QWidget):
         scenario_group = QGroupBox("场景")
         scenario_group.setLayout(scenario_form)
 
-        self.satellite_field = QComboBox()
-        for label, value in SATELLITE_MODES:
-            self.satellite_field.addItem(label, value)
-        self.satellite_summary = QLabel()
-        self.satellite_summary.setObjectName("hintLabel")
-        self.satellite_field.currentIndexChanged.connect(self._update_satellite_summary)
         self.resolution_field = _double_spin(0.1, 10.0, 0.1, 3)
         self.min_elevation_field = _double_spin(0.0, 90.0, 1.0, 2)
-        model_form = QFormLayout()
-        model_form.addRow("卫星方案", self.satellite_field)
-        model_form.addRow("当前卫星", self.satellite_summary)
-        model_form.addRow("网格分辨率 / °", self.resolution_field)
-        model_form.addRow("网格最低仰角 / °", self.min_elevation_field)
-        model_group = QGroupBox("模型与覆盖分析")
-        model_group.setLayout(model_form)
+        coverage_form = QFormLayout()
+        coverage_form.addRow("网格分辨率 / °", self.resolution_field)
+        coverage_form.addRow("网格最低仰角 / °", self.min_elevation_field)
+        coverage_group = QGroupBox("全球覆盖")
+        coverage_group.setLayout(coverage_form)
 
         layout = QHBoxLayout(tab)
         layout.addWidget(scenario_group, 1)
-        layout.addWidget(model_group, 1)
-        layout.addStretch(1)
+        layout.addWidget(coverage_group, 1)
+        return tab
+
+    def _build_satellite_tab(self) -> QWidget:
+        tab = QWidget()
+        self.satellite_field = QComboBox()
+        for label, value in SATELLITE_MODES:
+            self.satellite_field.addItem(label, value)
+        self.satellite_field.currentIndexChanged.connect(
+            self._update_satellite_summary
+        )
+        self.satellite_summary = QLabel()
+        self.satellite_summary.setObjectName("hintLabel")
+        self.satellite_name_field = QLineEdit()
+        self.satellite_name_field.textChanged.connect(
+            self._update_satellite_summary
+        )
+        self.ssc_field = QSpinBox()
+        self.ssc_field.setRange(1, 999999999)
+        self.satellite_step_field = _double_spin(1.0, 86400.0, 1.0, 2)
+        self.tle_field = QLineEdit()
+        browse_button = QPushButton("浏览")
+        browse_button.clicked.connect(self._browse_tle)
+        tle_row = QHBoxLayout()
+        tle_row.setContentsMargins(0, 0, 0, 0)
+        tle_row.addWidget(self.tle_field, 1)
+        tle_row.addWidget(browse_button)
+        tle_host = QWidget()
+        tle_host.setLayout(tle_row)
+
+        satellite_form = QFormLayout()
+        satellite_form.addRow("卫星方案", self.satellite_field)
+        satellite_form.addRow("当前卫星", self.satellite_summary)
+        satellite_form.addRow("参考星名称", self.satellite_name_field)
+        satellite_form.addRow("参考星 SSC", self.ssc_field)
+        satellite_form.addRow("传播步长 / s", self.satellite_step_field)
+        satellite_form.addRow("参考星 TLE", tle_host)
+        satellite_group = QGroupBox("轨道与三星偏置")
+        satellite_group.setLayout(satellite_form)
+
+        self.avoidance_enabled_field = QCheckBox("启用视线太阳干扰规避")
+        self.avoidance_angle_field = _double_spin(0.0, 180.0, 1.0, 2)
+        self.avoidance_enabled_field.toggled.connect(
+            self.avoidance_angle_field.setEnabled
+        )
+        avoidance_form = QFormLayout()
+        avoidance_form.addRow(self.avoidance_enabled_field)
+        avoidance_form.addRow("规避角度 / °", self.avoidance_angle_field)
+        avoidance_group = QGroupBox("干扰规避")
+        avoidance_group.setLayout(avoidance_form)
+
+        note = QLabel(
+            "三星由参考星 TLE 生成：RAAN 偏移 0°/45°/90°，"
+            "平近点角偏移 0°/−90°/−180°；星间链路按几何可见计算。"
+        )
+        note.setWordWrap(True)
+        note.setObjectName("hintLabel")
+        right = QVBoxLayout()
+        right.addWidget(avoidance_group)
+        right.addWidget(note)
+        right.addStretch(1)
+
+        layout = QHBoxLayout(tab)
+        layout.addWidget(satellite_group, 2)
+        layout.addLayout(right, 1)
         return tab
 
     def _build_station_tab(self) -> QWidget:
@@ -137,7 +197,7 @@ class GlobalCoveragePage(QWidget):
         delete_button.clicked.connect(self._delete_selected_stations)
 
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("快速预设"))
+        toolbar.addWidget(QLabel("文档预设"))
         toolbar.addWidget(self.station_preset_field)
         toolbar.addWidget(load_button)
         toolbar.addSpacing(16)
@@ -182,11 +242,19 @@ class GlobalCoveragePage(QWidget):
         config.scenario.start_time = self.start_field.text().strip()
         config.scenario.stop_time = self.stop_field.text().strip()
         config.satellite_group.mode = str(self.satellite_field.currentData())
+        config.satellite.name = self.satellite_name_field.text().strip()
+        config.satellite.ssc = self.ssc_field.value()
+        config.satellite.step = self.satellite_step_field.value()
+        config.satellite.tle_file = Path(self.tle_field.text().strip())
         config.coverage.resolution = self.resolution_field.value()
         config.coverage.min_elevation = self.min_elevation_field.value()
+        config.interference.enabled = self.avoidance_enabled_field.isChecked()
+        config.interference.angle = self.avoidance_angle_field.value()
         config.stations = self._read_stations()
-        if not config.scenario.name:
-            raise ValueError("场景名称不能为空。")
+        if not config.scenario.name or not config.satellite.name:
+            raise ValueError("场景名称和参考星名称不能为空。")
+        if not config.satellite.tle_file.is_file():
+            raise ValueError(f"TLE 文件不存在：{config.satellite.tle_file}")
         return config
 
     def write_config(self, config: GlobalCoverageConfig) -> None:
@@ -196,15 +264,20 @@ class GlobalCoveragePage(QWidget):
         self.stop_field.setText(config.scenario.stop_time)
         self.resolution_field.setValue(config.coverage.resolution)
         self.min_elevation_field.setValue(config.coverage.min_elevation)
+        self.satellite_name_field.setText(config.satellite.name)
+        self.ssc_field.setValue(config.satellite.ssc)
+        self.satellite_step_field.setValue(config.satellite.step)
+        self.tle_field.setText(str(config.satellite.tle_file))
+        self.avoidance_enabled_field.setChecked(config.interference.enabled)
+        self.avoidance_angle_field.setValue(config.interference.angle)
+        self.avoidance_angle_field.setEnabled(config.interference.enabled)
         self._select_data(self.satellite_field, config.satellite_group.mode)
-        self.station_preset_field.setCurrentIndex(min(max(len(config.stations), 1), 4) - 1)
+        preset = "all" if len(config.stations) >= 5 else "domestic"
+        if len(config.stations) == 1:
+            preset = "single"
+        self._select_data(self.station_preset_field, preset)
         self._fill_station_table(config.stations)
         self._update_satellite_summary()
-
-    def apply_stk_mode(self, mode: str) -> GlobalCoverageConfig:
-        config = self.read_config()
-        config.stk.mode = mode
-        return config
 
     def set_busy(self, busy: bool) -> None:
         self.run_button.setEnabled(not busy)
@@ -215,26 +288,41 @@ class GlobalCoveragePage(QWidget):
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
 
-    def show_result(self, result, batch: bool = False) -> None:
+    def show_result(self, result, document_scenarios: bool = False) -> None:
         from stk_simulation.simulations.global_coverage.service import (
             render_global_coverage,
         )
 
         self.plot_widget.show_result(result, render_global_coverage)
         self.set_status(
-            f"全部 8 组完成 · {result.output.result_dir}"
-            if batch
+            f"文档全部方案完成 · {result.output.result_dir}"
+            if document_scenarios
             else f"完成 · {result.output.image_path}"
         )
 
-    def _request_run(self, batch: bool) -> None:
+    def _request_run(self, document_scenarios: bool) -> None:
         try:
             config = self.read_config()
         except Exception as error:
             QMessageBox.critical(self, "参数错误", str(error))
             return
-        self.set_status("准备运行全部 8 组方案..." if batch else "准备连接 STK...")
-        self.run_requested.emit(config, batch)
+        self.set_status(
+            "准备运行文档全部方案..."
+            if document_scenarios
+            else "准备连接 STK..."
+        )
+        self.run_requested.emit(config, document_scenarios)
+
+    def _browse_tle(self) -> None:
+        current = Path(self.tle_field.text())
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择参考卫星 TLE",
+            str(current.parent),
+            "TLE 文件 (*.txt *.tle);;全部文件 (*.*)",
+        )
+        if selected:
+            self.tle_field.setText(selected)
 
     def _load_station_preset(self) -> None:
         self._fill_station_table(
@@ -267,7 +355,9 @@ class GlobalCoveragePage(QWidget):
             QMessageBox.information(self, "编辑地面站", "请先选择一个地面站。")
             return
         row = selected_rows[0]
-        updated = StationDialog.show(self, "编辑地面站", self._station_from_row(row))
+        updated = StationDialog.show(
+            self, "编辑地面站", self._station_from_row(row)
+        )
         if updated is None:
             return
         other_names = {
@@ -282,7 +372,8 @@ class GlobalCoveragePage(QWidget):
 
     def _delete_selected_stations(self) -> None:
         selected_rows = sorted(
-            {index.row() for index in self.station_table.selectedIndexes()}, reverse=True
+            {index.row() for index in self.station_table.selectedIndexes()},
+            reverse=True,
         )
         if not selected_rows:
             QMessageBox.information(self, "删除地面站", "请先选择要删除的地面站。")
@@ -291,11 +382,10 @@ class GlobalCoveragePage(QWidget):
             self.station_table.removeRow(row)
 
     def _update_satellite_summary(self) -> None:
-        names = "、".join(
-            item.name
-            for item in satellite_template(str(self.satellite_field.currentData()))
-        )
-        self.satellite_summary.setText(names)
+        names = [self.satellite_name_field.text().strip() or "TN01A"]
+        if self.satellite_field.currentData() == "multi":
+            names.extend(("TN02A", "TN03A"))
+        self.satellite_summary.setText("、".join(names))
 
     def _fill_station_table(self, stations: list[StationConfig]) -> None:
         self.station_table.setRowCount(0)
@@ -333,7 +423,8 @@ class GlobalCoveragePage(QWidget):
 
     def _read_stations(self) -> list[StationConfig]:
         stations = [
-            self._station_from_row(row) for row in range(self.station_table.rowCount())
+            self._station_from_row(row)
+            for row in range(self.station_table.rowCount())
         ]
         if not stations:
             raise ValueError("请至少添加一个地面站。")

@@ -34,7 +34,7 @@ class STKCoverage:
         scenario,
         name: str,
         resolution_deg: float,
-        chain,
+        chains,
         grid_seed,
     ):
         coverage = scenario.Children.New(AgESTKObjectType.eCoverageDefinition, name)
@@ -45,12 +45,15 @@ class STKCoverage:
         coverage.PointDefinition.SeedInstance = (
             f"Facility/{instance_name(grid_seed)}"
         )
-        coverage.AssetList.Add(f"Chain/{instance_name(chain)}")
+        if not isinstance(chains, (list, tuple)):
+            chains = [chains]
+        for chain in chains:
+            coverage.AssetList.Add(f"Chain/{instance_name(chain)}")
         coverage.Graphics.Static.IsPointsVisible = False
         coverage.ComputeAccesses()
         print(
             f"[覆盖] Coverage computed: {name}, {resolution_deg:.2f} deg, "
-            f"grid seed = {instance_name(grid_seed)}"
+            f"assets = {len(chains)}, grid seed = {instance_name(grid_seed)}"
         )
         return coverage
 

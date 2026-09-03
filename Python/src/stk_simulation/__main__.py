@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 def main() -> int:
-    print("[启动] 正在打开 STK 卫星通信仿真界面...", flush=True)
+    print("[启动] 正在打开 STK 全球覆盖通信时长仿真界面...", flush=True)
     import matplotlib
 
     matplotlib.use("QtAgg")

@@ -129,35 +129,6 @@ methods (Static)
     
     end
 
-%发射机创建
-    function transmitter = createTransmitter(parent, name)
-        transmitter = parent.Children.New( 'eTransmitter', name);
-        transmitter.SetModel('Simple Transmitter Model');
-    end
-
-%接收机创建
-    function receiver = createReceiver(parent, name)
-        receiver = parent.Children.New( 'eReceiver', name);
-        receiver.SetModel( 'Simple Receiver Model');
-    
-        fprintf( '[接收机] 成功创建 Receiver: %s/%s\n', parent.InstanceName, name);
-    end
-      
-% 加载 STK 自带 GPS 星座
-    function gpsConstellation = loadGpsConstellation(root, scenario)
-    
-        fprintf('[GPS] 正在加载 STK 内置 GPS Constellation...\n');
-    
-        % 调用 STK Connect Command
-        root.ExecuteCommand( 'LoadGPSConstellation *');
-    
-        % 获取刚创建的 Constellation
-        constellations = scenario.Children.GetElements('eConstellation');
-        gpsConstellation = constellations.GetItemByName('GPSConstellation');
-        fprintf('[GPS] GPSConstellation 加载完成。\n');
-    
-    end
-
 % 创建通用 Constellation
     function constellation = createConstellation(scenario,name,objects)
 
@@ -174,30 +145,6 @@ methods (Static)
         end
  
         fprintf( '[星座] 成功创建 Constellation: %s，对象数量=%d\n', name, numel(objects));
-    
-    end
-
-% 获取当前 Scenario 中全部 GPS Satellite
-    function gpsSatellites = getGpsSatellites(scenario)
-    
-        % 获取 Scenario 中所有 Satellite
-        satellites = scenario.Children.GetElements( 'eSatellite');
-        gpsSatellites = {};
-    
-        % STK COM Collection 使用 0-based index
-        for i = 0:satellites.Count - 1
-    
-            sat = satellites.Item( cast(i, 'int32'));
-            satName = char(sat.InstanceName);
-    
-            % STK GPS 默认名称：gps-XX_svnYY
-            if startsWith( lower(satName), 'gps-')
-                gpsSatellites{end + 1} = sat; %#ok<AGROW>
-            end
-    
-        end
- 
-        fprintf('[GPS] 找到 GPS Satellite 数量：%d\n', numel(gpsSatellites));
     
     end
 

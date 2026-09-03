@@ -1,4 +1,4 @@
-"""统一调度两个仿真功能的 STK 工作线程。"""
+"""在固定工作线程中调度全球覆盖仿真。"""
 
 from __future__ import annotations
 
@@ -6,50 +6,40 @@ import traceback
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
+
 class STKWorker(QObject):
-    completed = Signal(str, object)
-    failed = Signal(str, str)
-    status_changed = Signal(str, str)
+    completed = Signal(object)
+    failed = Signal(str)
+    status_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self._session = None
 
-    @Slot(str, object, bool)
-    def run(self, feature_key: str, config, batch: bool) -> None:
+    @Slot(object, bool)
+    def run(self, config, document_scenarios: bool) -> None:
         try:
             if self._session is None:
                 from stk_simulation.stk.session import STKSession
 
                 self._session = STKSession()
             root = self._session.connect(config.stk.mode)
-            if feature_key == "global_coverage":
-                from stk_simulation.simulations.global_coverage.service import (
-                    compute_global_coverage,
-                    run_global_coverage_batch,
-                )
+            from stk_simulation.simulations.global_coverage.service import (
+                compute_global_coverage,
+                run_document_scenarios,
+            )
 
-                if batch:
-                    result = run_global_coverage_batch(
-                        root,
-                        config,
-                        lambda text: self.status_changed.emit(feature_key, text),
-                    )
-                else:
-                    result = compute_global_coverage(root, config)
-            elif feature_key == "gps_visibility":
-                from stk_simulation.simulations.gps_visibility.service import (
-                    compute_gps_visibility,
+            if document_scenarios:
+                result = run_document_scenarios(
+                    root, config, self.status_changed.emit
                 )
-
-                result = compute_gps_visibility(root, config)
             else:
-                raise ValueError(f"未知仿真功能：{feature_key}")
+                result = compute_global_coverage(root, config)
         except Exception as error:
             traceback.print_exc()
-            self.failed.emit(feature_key, str(error))
+            self.failed.emit(str(error))
             return
-        self.completed.emit(feature_key, result)
+        self.completed.emit(result)
 
     @Slot()
     def release(self) -> None:
@@ -59,12 +49,12 @@ class STKWorker(QObject):
 
 
 class SimulationController(QObject):
-    run_requested = Signal(str, object, bool)
+    run_requested = Signal(object, bool)
     release_requested = Signal()
     busy_changed = Signal(bool)
-    completed = Signal(str, object)
-    failed = Signal(str, str)
-    status_changed = Signal(str, str)
+    completed = Signal(object)
+    failed = Signal(str)
+    status_changed = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -84,26 +74,26 @@ class SimulationController(QObject):
     def is_busy(self) -> bool:
         return self._busy
 
-    def start(self, feature_key: str, config, batch: bool = False) -> None:
+    def start(self, config, document_scenarios: bool = False) -> None:
         if self._busy:
             raise RuntimeError("已有仿真任务正在运行。")
         self._set_busy(True)
-        self.run_requested.emit(feature_key, config, batch)
+        self.run_requested.emit(config, document_scenarios)
 
     def shutdown(self) -> None:
         self.release_requested.emit()
         self._thread.quit()
         self._thread.wait()
 
-    @Slot(str, object)
-    def _on_completed(self, feature_key: str, result) -> None:
+    @Slot(object)
+    def _on_completed(self, result) -> None:
         self._set_busy(False)
-        self.completed.emit(feature_key, result)
+        self.completed.emit(result)
 
-    @Slot(str, str)
-    def _on_failed(self, feature_key: str, message: str) -> None:
+    @Slot(str)
+    def _on_failed(self, message: str) -> None:
         self._set_busy(False)
-        self.failed.emit(feature_key, message)
+        self.failed.emit(message)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
