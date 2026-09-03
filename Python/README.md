@@ -57,6 +57,8 @@ python simulations/gps_visibility/run.py
 
 桌面界面使用 Python 自带的 `tkinter/ttk`，不需要额外安装 Qt。参数区和结果区可拖动调整宽度；结果区提供 Matplotlib 的缩放、平移和图片保存工具栏。STK 计算在固定工作线程执行，窗口在计算期间仍可正常刷新。
 
+全球覆盖界面的地面站页支持添加、编辑和删除任意数量的自定义地面站；单站到四站方案作为快速填充预设保留。表格中的每个地面站都会参与仿真。
+
 计算与绘图相互独立：
 
 - `compute_global_coverage` / `compute_gps_visibility`：只操作 STK 并返回数值结果。

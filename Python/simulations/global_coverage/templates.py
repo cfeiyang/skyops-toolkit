@@ -15,7 +15,6 @@ class StationConfig:
     lon: float
     alt: float
     min_elevation: float
-    enabled: bool = True
 
 
 @dataclass

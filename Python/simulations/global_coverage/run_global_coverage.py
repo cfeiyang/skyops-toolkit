@@ -41,7 +41,7 @@ def compute_global_coverage(
     root, config: GlobalCoverageConfig
 ) -> GlobalCoverageResult:
     """创建 STK 场景并提取绘图所需的全部数值，不操作 GUI。"""
-    stations = [station for station in config.stations if station.enabled]
+    stations = config.stations
     scenario = STKCore.create_scenario(
         root,
         config.scenario.name,
@@ -65,7 +65,6 @@ def compute_global_coverage(
         scenario, config.ground_group.name, facilities
     )
 
-    satellite_down_node = None
     if config.satellite_group.mode == "single":
         chain = STKChain.create_sat_ground_chain(
             scenario, config.chain.name, ground_node, satellite_node
@@ -159,7 +158,9 @@ def _create_satellites(root, scenario, config: GlobalCoverageConfig) -> list[Any
             )
         ]
     return [
-        STKObjects.create_satellite_from_elements(root, satellite_config)
+        STKObjects.create_satellite_from_elements(
+            root, scenario, satellite_config
+        )
         for satellite_config in satellite_template(config.satellite_group.mode)
     ]
 

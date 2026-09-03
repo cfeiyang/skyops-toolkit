@@ -94,7 +94,7 @@ def plot_global_coverage(result, config, axes=None):
         track_x, track_y = world_map(track_longitude, track_latitude)
         axes.plot(track_x, track_y, color=track_colors[index], linewidth=1.3)
 
-    stations = [station for station in result.cfg.stations if station.enabled]
+    stations = result.cfg.stations
     station_colors = plt.colormaps["tab10"](
         np.linspace(0.0, 1.0, max(len(stations), 1))
     )
