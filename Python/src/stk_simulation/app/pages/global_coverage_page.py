@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -135,15 +134,8 @@ class GlobalCoveragePage(QWidget):
         self.ssc_field = QSpinBox()
         self.ssc_field.setRange(1, 999999999)
         self.satellite_step_field = _double_spin(1.0, 86400.0, 1.0, 2)
-        self.tle_field = QLineEdit()
-        browse_button = QPushButton("浏览")
-        browse_button.clicked.connect(self._browse_tle)
-        tle_row = QHBoxLayout()
-        tle_row.setContentsMargins(0, 0, 0, 0)
-        tle_row.addWidget(self.tle_field, 1)
-        tle_row.addWidget(browse_button)
-        tle_host = QWidget()
-        tle_host.setLayout(tle_row)
+        self.tle_url_field = QLineEdit()
+        self.ssc_field.valueChanged.connect(self._sync_tle_url)
 
         satellite_form = QFormLayout()
         satellite_form.addRow("卫星方案", self.satellite_field)
@@ -151,7 +143,7 @@ class GlobalCoveragePage(QWidget):
         satellite_form.addRow("参考星名称", self.satellite_name_field)
         satellite_form.addRow("参考星 SSC", self.ssc_field)
         satellite_form.addRow("传播步长 / s", self.satellite_step_field)
-        satellite_form.addRow("参考星 TLE", tle_host)
+        satellite_form.addRow("TLE 在线地址", self.tle_url_field)
         satellite_group = QGroupBox("轨道与三星偏置")
         satellite_group.setLayout(satellite_form)
 
@@ -245,7 +237,7 @@ class GlobalCoveragePage(QWidget):
         config.satellite.name = self.satellite_name_field.text().strip()
         config.satellite.ssc = self.ssc_field.value()
         config.satellite.step = self.satellite_step_field.value()
-        config.satellite.tle_file = Path(self.tle_field.text().strip())
+        config.satellite.tle_url = self.tle_url_field.text().strip()
         config.coverage.resolution = self.resolution_field.value()
         config.coverage.min_elevation = self.min_elevation_field.value()
         config.interference.enabled = self.avoidance_enabled_field.isChecked()
@@ -253,8 +245,8 @@ class GlobalCoveragePage(QWidget):
         config.stations = self._read_stations()
         if not config.scenario.name or not config.satellite.name:
             raise ValueError("场景名称和参考星名称不能为空。")
-        if not config.satellite.tle_file.is_file():
-            raise ValueError(f"TLE 文件不存在：{config.satellite.tle_file}")
+        if not config.satellite.tle_url:
+            raise ValueError("TLE 在线地址不能为空。")
         return config
 
     def write_config(self, config: GlobalCoverageConfig) -> None:
@@ -267,7 +259,7 @@ class GlobalCoveragePage(QWidget):
         self.satellite_name_field.setText(config.satellite.name)
         self.ssc_field.setValue(config.satellite.ssc)
         self.satellite_step_field.setValue(config.satellite.step)
-        self.tle_field.setText(str(config.satellite.tle_file))
+        self.tle_url_field.setText(config.satellite.tle_url)
         self.avoidance_enabled_field.setChecked(config.interference.enabled)
         self.avoidance_angle_field.setValue(config.interference.angle)
         self.avoidance_angle_field.setEnabled(config.interference.enabled)
@@ -313,21 +305,29 @@ class GlobalCoveragePage(QWidget):
         )
         self.run_requested.emit(config, document_scenarios)
 
-    def _browse_tle(self) -> None:
-        current = Path(self.tle_field.text())
-        selected, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择参考卫星 TLE",
-            str(current.parent),
-            "TLE 文件 (*.txt *.tle);;全部文件 (*.*)",
-        )
-        if selected:
-            self.tle_field.setText(selected)
-
     def _load_station_preset(self) -> None:
         self._fill_station_table(
             station_template(str(self.station_preset_field.currentData()))
         )
+
+    def _sync_tle_url(self, ssc: int) -> None:
+        url = self.tle_url_field.text().strip()
+        if not url:
+            return
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        query["CATNR"] = str(ssc)
+        query.setdefault("FORMAT", "TLE")
+        updated_url = urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path,
+                urlencode(query),
+                parts.fragment,
+            )
+        )
+        self.tle_url_field.setText(updated_url)
 
     def _add_station(self) -> None:
         existing_names = {

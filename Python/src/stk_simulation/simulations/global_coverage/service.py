@@ -12,6 +12,7 @@ import pandas as pd
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
+from stk_simulation.infrastructure.tle import refresh_tle_cache
 from stk_simulation.simulations.common import OutputResult
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.plot import plot_global_coverage
@@ -46,9 +47,14 @@ class GlobalCoverageResult:
 
 
 def compute_global_coverage(
-    root, config: GlobalCoverageConfig
+    root,
+    config: GlobalCoverageConfig,
+    *,
+    refresh_tle: bool = True,
 ) -> GlobalCoverageResult:
     """创建 STK 场景并提取绘图所需的全部数值，不操作 GUI。"""
+    if refresh_tle:
+        _refresh_reference_tle(config)
     scenario = STKSession.create_scenario(
         root,
         config.scenario.name,
@@ -151,6 +157,8 @@ def run_document_scenarios(
     progress: Callable[[str], None] | None = None,
 ) -> GlobalCoverageResult:
     """运行 Word 文档规定的三组场景，并输出海外站覆盖增量图。"""
+    _report(progress, "正在从 CelesTrak 更新参考星 TLE...")
+    _refresh_reference_tle(base_config)
     jobs = (
         ("single", "single", "单星临港", "global_coverage_1sat_1station.png"),
         (
@@ -177,7 +185,7 @@ def run_document_scenarios(
         config.satellite_group.mode = satellite_mode
         config.stations = station_template(station_mode)
         config.output.image_name = image_name
-        result = compute_global_coverage(root, config)
+        result = compute_global_coverage(root, config, refresh_tle=False)
         _render_offscreen(result)
         results[station_mode] = result
         image_paths.append(result.output.image_path)
@@ -263,6 +271,14 @@ def _create_satellites(
         for satellite_config in elements[1:]
     )
     return satellites
+
+
+def _refresh_reference_tle(config: GlobalCoverageConfig) -> None:
+    config.satellite.tle_file = refresh_tle_cache(
+        config.satellite.tle_url,
+        config.satellite.tle_file,
+        config.satellite.ssc,
+    )
 
 
 def _apply_interference_avoidance(

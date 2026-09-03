@@ -56,7 +56,7 @@ global_coverage/plot.py ────► GUI 图像和 PNG
 ```text
 Python/
 ├── data/                                  输入数据，不提交 Git
-│   └── TN1A_TLE_20260830.txt              默认参考星 TLE
+│   └── TN1A_LATEST.tle                    自动下载的参考星缓存
 ├── results/                               运行结果，不提交 Git
 │   └── global_coverage/
 ├── docs/
@@ -76,7 +76,8 @@ Python/
 │   │   ├── pages/global_coverage_page.py  全球覆盖参数页
 │   │   └── widgets/plot_widget.py         Matplotlib 图像区域
 │   ├── infrastructure/
-│   │   └── paths.py                       源码/EXE 路径规则
+│   │   ├── paths.py                       源码/EXE 路径规则
+│   │   └── tle.py                         CelesTrak 下载、校验和缓存
 │   ├── simulations/
 │   │   ├── common.py                      公共配置和输出类型
 │   │   └── global_coverage/
@@ -161,7 +162,7 @@ STK 会话在工作线程中延迟创建并复用。Qt 主线程不直接持有 
 
 应用默认加载 Word 仿真场景中的最终方案：
 
-- 仿真时间：`1 Sep 2026 00:00:00.000` 至 `2 Sep 2026 00:00:00.000`；
+- 仿真时间：启动时读取电脑本地日期，当天 00:00 至次日 00:00；
 - 参考星：TN01A，SSC 59705；
 - 参考星传播：SGP4，步长 60 s；
 - 卫星模式：三星几何星间中继；
@@ -170,8 +171,10 @@ STK 会话在工作线程中延迟创建并复用。Qt 主线程不直接持有 
 - Coverage 分辨率：0.5°；
 - 太阳干扰规避：默认关闭；
 - 规避角预设：15°。
+- 时长梯度：固定 1 小时；
+- 等值线标签：直接显示 `1 h`、`2 h` 等时长。
 
-GUI 可以修改场景时间、TLE、SSC、传播步长、卫星模式、Coverage 参数、规避开关和全部地面站参数。
+GUI 可以修改场景时间、TLE 在线地址、SSC、传播步长、卫星模式、Coverage 参数、规避开关和全部地面站参数。
 
 ## 8. 文档规定的五个地面站
 
@@ -193,7 +196,17 @@ GUI 可以修改场景时间、TLE、SSC、传播步长、卫星模式、Coverag
 
 ## 9. 三星如何从参考星 TLE 生成
 
-单星模式直接调用 STK SGP4 的 `AddSegsFromFile()`，从用户选择的 TLE 中加载 SSC 对应卫星。
+每次开始仿真时，`infrastructure/tle.py` 请求：
+
+```text
+https://celestrak.org/NORAD/elements/gp.php?CATNR=59705&FORMAT=TLE
+```
+
+CelesTrak 的 `FORMAT=TLE` 返回三行格式：卫星名称行、TLE Line 1、TLE Line 2。程序验证两行的 SSC 和标准行长度后，以原子替换方式写入 `data/TN1A_LATEST.tle`。网络请求失败时，只在现有缓存仍能通过相同校验的情况下继续运行。
+
+程序先检查缓存修改时间：两小时内的有效缓存直接使用，超过两小时才尝试在线更新；“文档全部方案”的三个 STK 场景共用同一份下载结果。这样既能自动取得最新发布的数据，也符合 CelesTrak GP 数据约两小时更新一次、不要重复请求的 [使用政策](https://celestrak.org/usage-policy.php)。接口和返回格式见官方的 [GP 数据格式说明](https://celestrak.org/NORAD/documentation/gp-data-formats.php)。
+
+单星模式调用 STK SGP4 的 `AddSegsFromFile()`，从缓存文件中加载 SSC 对应卫星。
 
 三星模式先用同一 TLE 创建参考星，再解析同一个 SSC 的两行根数，并按文档生成第二、第三颗卫星：
 
@@ -252,7 +265,7 @@ FOM 的 `MinAssets=1`，任意一条直达或中继路径成立，该网格点�
 
 1. 设置角度、距离、时间、日期和频率单位。
 2. 关闭已有 Scenario，创建当前 Scenario 并设置时间范围。
-3. 从 TLE 创建参考星；三星模式继续生成 TN02A 和 TN03A。
+3. 从 CelesTrak 更新并校验 TLE，本地缓存后创建参考星；三星模式继续生成 TN02A 和 TN03A。
 4. 创建全部 Facility，添加最低仰角和可选太阳排除角。
 5. 多站组合为 GroundStations Constellation，含义为 `ANY OF`。
 6. 单星创建一条直达 Chain；三星创建直达链和两两星间中继链。
@@ -307,7 +320,8 @@ IncreaseHour = max(FiveStationHour - DomesticHour, 0)
 - 使用 CEA/Behrmann 等面积世界地图；
 - 绘制通信时长填色等值面和等值线；
 - 绘制海岸线、三星轨迹和地面站；
-- 动态选择易读的色阶步长；
+- 按固定 1 小时间隔生成填色梯度、等值线和色条刻度；
+- 在线上标注 `1 h`、`2 h` 等具体时长；
 - 普通图显示“通信时长 / h”，对比图显示“通信时长增量 / h”；
 - 保存 300 DPI PNG。
 
@@ -416,11 +430,13 @@ python -m pip install -e .
 stk-simulation
 ```
 
-确认 `python` 和 `pip` 都属于同一个 `stk` 环境。默认 TLE 放入：
+确认 `python` 和 `pip` 都属于同一个 `stk` 环境。首次仿真会自动创建：
 
 ```text
-Python/data/TN1A_TLE_20260830.txt
+Python/data/TN1A_LATEST.tle
 ```
+
+首次运行需要访问 CelesTrak；以后网络不可用时可以继续使用已校验的缓存。
 
 如果 `stk-simulation` 尚未被 PowerShell 识别，可直接运行：
 
@@ -496,12 +512,10 @@ Python/dist/STKSimulation.exe
 ```text
 STKSimulation-1.0.0/
 ├── STKSimulation.exe
-├── data/
-│   └── TN1A_TLE_20260830.txt
 └── 使用说明.md
 ```
 
-目标电脑不需要 Python，但必须安装并授权 STK Desktop 12.6，并且发布目录必须具有创建 `results/` 和写入 PNG 的权限。
+目标电脑不需要 Python，但必须安装并授权 STK Desktop 12.6，首次运行应能访问 CelesTrak，并且发布目录必须具有创建 `data/`、`results/` 和写入文件的权限。需要离线发布时，可以把构建电脑已经下载的 `data/TN1A_LATEST.tle` 一起交付。
 
 ## 22. 新增其他仿真功能
 
@@ -554,9 +568,13 @@ render_*()    绘图和保存
 
 先执行 `python -m pip install -e .`，或者使用 `python -m stk_simulation`。同时确认终端已激活正确 Conda 环境。
 
+### CelesTrak 下载失败
+
+如果已经存在有效的 `data/TN1A_LATEST.tle`，程序会自动使用缓存；如果是首次运行，则需要检查目标电脑对 `https://celestrak.org` 的 HTTPS 访问。
+
 ### TLE 中没有指定 SSC
 
-检查界面 SSC 是否与 TLE 第一行、第二行的卫星编号一致。三星模式必须解析该 TLE，不能只在文件中存在其他卫星。
+检查界面 SSC 与 TLE 在线地址中的 `CATNR` 是否一致。下载结果的第一行、第二行卫星编号都必须与 SSC 一致。
 
 ### `QThread: Destroyed while thread is still running`
 
@@ -573,6 +591,7 @@ render_*()    绘图和保存
 - `service.py` 负责业务顺序，`stk/` 负责单个 API 动作；
 - 绘图代码只接收纯 Python 结果；
 - 所有路径经 `PathsConfig` 生成；
+- 每次仿真优先在线更新 TLE，网络失败时只使用校验通过的缓存；
 - 三星轨道从当前 TLE 派生，不恢复历史硬编码根数；
 - 几何星间链路显式排除同星两端；
 - `data/`、`results/`、`build/`、`dist/` 和虚拟环境不提交 Git；

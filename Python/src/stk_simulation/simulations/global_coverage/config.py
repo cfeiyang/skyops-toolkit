@@ -11,6 +11,7 @@ from stk_simulation.simulations.common import (
     STKConfig,
     SatelliteConfig,
     ScenarioConfig,
+    current_local_day_period,
 )
 from stk_simulation.simulations.global_coverage.presets import (
     StationConfig,
@@ -82,15 +83,24 @@ class GlobalCoverageConfig:
 
 def config_global_coverage() -> GlobalCoverageConfig:
     paths = PathsConfig.for_simulation("global_coverage")
+    start_time, stop_time = current_local_day_period()
     return GlobalCoverageConfig(
         paths=paths,
         stk=STKConfig(mode="new"),
-        scenario=ScenarioConfig(name="GlobalCoverage"),
+        scenario=ScenarioConfig(
+            name="GlobalCoverage",
+            start_time=start_time,
+            stop_time=stop_time,
+        ),
         satellite=SatelliteConfig(
             name="TN01A",
             ssc=59705,
             step=60,
-            tle_file=paths.data_dir / "TN1A_TLE_20260830.txt",
+            tle_file=paths.data_dir / "TN1A_LATEST.tle",
+            tle_url=(
+                "https://celestrak.org/NORAD/elements/"
+                "gp.php?CATNR=59705&FORMAT=TLE"
+            ),
         ),
         satellite_group=SatelliteGroupConfig(mode="multi"),
         interference=InterferenceAvoidanceConfig(),

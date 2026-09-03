@@ -4,13 +4,15 @@
 
 主要能力：
 
-- 参考卫星通过 TLE 创建；
+- 每次仿真自动从 CelesTrak 更新参考星 TLE，并保留本地缓存；
+- 场景时间默认读取电脑当天日期，计算当天 00:00 至次日 00:00；
 - 三星按参考星 RAAN `+0°/+45°/+90°`、平近点角 `0°/−90°/−180°` 自动生成；
 - 三星之间建立两两几何可见链路，用于增加覆盖范围和时长；
 - 内置上海临港、喀什、佳木斯、海南、墨西哥五个文档站址；
 - 地面站名称、经纬度、高度和最低仰角可以编辑；
 - 可选视线太阳干扰规避，默认规避角为 15°；
 - 输出全球通信时长图和墨西哥规划站覆盖增量图。
+- 时长等值梯度固定为 1 小时，等值线直接显示小时标签。
 
 完整的代码结构、调用链、依赖设计和打包说明见 [项目开发与打包指南](docs/PROJECT_GUIDE.md)。
 
@@ -31,13 +33,13 @@ python -m pip install "C:\Program Files\AGI\STK 12\bin\AgPythonAPI\agi.stk12-12.
 python -m pip install -e .
 ```
 
-默认 TLE 文件位置：
+默认在线数据源：
 
 ```text
-Python/data/TN1A_TLE_20260830.txt
+https://celestrak.org/NORAD/elements/gp.php?CATNR=59705&FORMAT=TLE
 ```
 
-`data/` 与 `results/` 不纳入 Git，也可以在界面中选择其他 TLE 文件。
+成功下载后缓存到 `Python/data/TN1A_LATEST.tle`。两小时内重复仿真直接使用缓存，以符合 CelesTrak 的更新频率；缓存超过两小时才再次请求。网络失败时使用上次有效缓存；首次运行既无法联网又没有缓存时，程序会明确报错。`data/` 与 `results/` 不纳入 Git。
 
 ## 启动桌面程序
 
@@ -95,4 +97,4 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 Python/dist/STKSimulation.exe
 ```
 
-目标电脑不需要安装 Python，但仍需安装并授权 STK Desktop 12.6。TLE 放在 EXE 同级 `data/`，结果写入 EXE 同级 `results/`。
+目标电脑不需要安装 Python，但仍需安装并授权 STK Desktop 12.6。程序在线更新 TLE 并缓存到 EXE 同级 `data/`，结果写入 EXE 同级 `results/`。

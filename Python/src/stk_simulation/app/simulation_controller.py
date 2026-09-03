@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import traceback
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
+
+if TYPE_CHECKING:
+    from stk_simulation.stk.session import STKSession
 
 
 class STKWorker(QObject):
@@ -14,7 +18,7 @@ class STKWorker(QObject):
 
     def __init__(self) -> None:
         super().__init__()
-        self._session = None
+        self._session: STKSession | None = None
 
     @Slot(object, bool)
     def run(self, config, document_scenarios: bool) -> None:

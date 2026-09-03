@@ -23,8 +23,9 @@ def plot_global_coverage(result, config, axes=None):
     time_hours = coverage["TimeHour"].to_numpy(dtype=float)
     finite_time = time_hours[np.isfinite(time_hours)]
     max_hour = float(finite_time.max()) if finite_time.size else float("nan")
-    level_step, max_level = _nice_level_step(max_hour)
-    levels = np.arange(0.0, max_level + level_step * 0.5, level_step)
+    level_step = 1.0
+    max_level = max(1.0, float(np.ceil(max_hour))) if np.isfinite(max_hour) else 1.0
+    levels = np.arange(0.0, max_level + 0.5, level_step)
 
     # Basemap/PROJ 会把相差 360° 的首尾经度视为同一条经线。
     # 全球网格不重复加入右端点，避免地图宽度退化为接近 0。
@@ -83,7 +84,12 @@ def plot_global_coverage(result, config, axes=None):
         linewidths=0.5,
     )
     if plot.show_contour_labels and levels.size > 1:
-        axes.clabel(contour, inline=True, fontsize=9, fmt="%.2g")
+        axes.clabel(
+            contour,
+            inline=True,
+            fontsize=9,
+            fmt=lambda value: f"{value:g} h",
+        )
 
     world_map.drawcoastlines(color="black", linewidth=1.0)
     track_colors = plt.colormaps["tab10"](
@@ -174,17 +180,6 @@ def _interpolate_periodic(longitude, latitude, values, grid_lon, grid_lat):
         extended_points[valid], extended_values[valid], fill_value=np.nan
     )
     return interpolator(grid_lon, grid_lat)
-
-
-def _nice_level_step(max_hour: float) -> tuple[float, float]:
-    if not np.isfinite(max_hour) or max_hour <= 0:
-        return 1.0, 1.0
-    raw_step = max_hour / 8.0
-    base = 10.0 ** np.floor(np.log10(raw_step))
-    ratio = raw_step / base
-    nice_ratio = next(value for value in (1.0, 2.0, 5.0, 10.0) if ratio <= value)
-    step = nice_ratio * base
-    return float(step), float(np.ceil(max_hour / step) * step)
 
 
 def _coordinate_formatter(world_map, time_grid, lon_range, lat_range, step):
