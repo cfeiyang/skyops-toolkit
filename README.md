@@ -3,7 +3,7 @@
 基于 MATLAB / Python 与 STK 12.6 Object Model 的卫星通信仿真工程。
 
 - `MATLAB/`：已验证的 MATLAB 实现。
-- `Python/`：Python 3.10 与 STK 12.6 官方 `agi.stk12` API 实现。
+- `Python/`：Python 3.10 与 STK 12.6 官方 `agi.stk12` API 实现，两个仿真功能共用一个桌面程序。
 
 ## 目录
 
@@ -13,7 +13,8 @@ Python/         Python 3.10 实现
 ```
 
 MATLAB 使用前请先进入 `MATLAB/` 并执行 `setupProject`。
-Python 的环境与运行说明见 `Python/README.md`。
+Python 的环境与运行说明见 `Python/README.md`；安装后执行
+`python -m stk_simulation` 启动统一界面。
 
 ## 仿真一：全球通信时长
 
@@ -73,7 +74,9 @@ app = actxGetRunningServer('STK12.Application');
 root = app.Personality2;
 ```
 
-公共封装按职责划分为 `STKCore / STKObjects / STKConstraints / STKChain / STKCoverage`。业务参数不进入 `stk_api`，便于后续仿真场景复用。
+Python 公共封装位于 `src/stk_simulation/stk/`，按 Session、Objects、
+Constraints、Chain 和 Coverage 职责划分。业务参数不进入 STK 接口层，便于
+后续仿真场景复用。
 
 工程优先使用 Object Model；加载 STK 内置GPS星座时使用对应的 Connect Command。
 

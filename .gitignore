@@ -27,6 +27,10 @@ Python/results/
 # ---- Python 缓存 ----
 __pycache__/
 *.py[cod]
+Python/build/
+Python/dist/
+Python/*.egg-info/
+Python/src/*.egg-info/
 
 # ---- 系统 / 编辑器 ----
 Thumbs.db

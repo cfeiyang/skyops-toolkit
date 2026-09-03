@@ -1,28 +1,27 @@
-# 卫星通信仿真工程（Python 3.10 / STK 12.6）
+# STK 卫星通信仿真（Python 3.10 / STK 12.6）
 
-这是同级 `MATLAB/` 工程的 Python 实现，使用 STK 12.6 自带的 `agi.stk12` Python API 驱动 STK Desktop。
+这是同级 `MATLAB/` 工程的 Python 实现，使用 STK 12.6 官方
+`agi.stk12` API。一个桌面程序统一提供以下功能：
 
-## 环境
+- 全球通信时长分析；
+- GPS 可见数量分析。
 
-- Windows
-- Python 3.10
-- STK Desktop 12.6
-- STK 12.6 Python API wheel
-- NumPy、Pandas、SciPy、Matplotlib、Basemap
+## 运行环境
 
-先安装普通 Python 依赖：
+- Windows 64 位；
+- Python 3.10.x（不要使用 3.10.0）；
+- STK Desktop 12.6 及有效许可证；
+- STK 12.6 Python API wheel。
+
+## 首次安装
+
+在 `Python/` 目录执行：
 
 ```powershell
 python -m pip install -r requirements.txt
-```
-
-STK Python API 需从 STK 12.6 安装目录中的 wheel 安装，典型位置为：
-
-```powershell
 python -m pip install "C:\Program Files\AGI\STK 12\bin\AgPythonAPI\agi.stk12-12.6.0-py3-none-any.whl"
+python -m pip install -e .
 ```
-
-## 输入数据
 
 默认 TLE 文件位置：
 
@@ -30,47 +29,79 @@ python -m pip install "C:\Program Files\AGI\STK 12\bin\AgPythonAPI\agi.stk12-12.
 Python/data/TN1A_TLE_20260830.txt
 ```
 
-`data/` 和 `results/` 不纳入 Git。
+`data/` 与 `results/` 不纳入 Git。GPS 功能也可以在界面中选择其他 TLE
+文件。
 
-## 运行
-
-全球通信时长 GUI：
-
-```powershell
-python app/global_coverage_app.py
-```
-
-GPS 可见数量 GUI：
+## 启动统一桌面程序
 
 ```powershell
-python app/gps_visibility_app.py
+python -m stk_simulation
 ```
 
-命令行执行：
+也可以使用安装后生成的命令：
 
 ```powershell
-python simulations/global_coverage/run.py
-python simulations/gps_visibility/run.py
+stk-simulation
 ```
 
-## 界面与执行方式
+## 命令行运行
 
-桌面界面使用 Python 自带的 `tkinter/ttk`，不需要额外安装 Qt。参数区和结果区可拖动调整宽度；结果区提供 Matplotlib 的缩放、平移和图片保存工具栏。STK 计算在固定工作线程执行，窗口在计算期间仍可正常刷新。
+```powershell
+python -m stk_simulation.cli global-coverage
+python -m stk_simulation.cli gps-visibility
+```
 
-全球覆盖界面的地面站页支持添加、编辑和删除任意数量的自定义地面站；单站到四站方案作为快速填充预设保留。表格中的每个地面站都会参与仿真。
+连接已经运行的 STK：
 
-计算与绘图相互独立：
+```powershell
+python -m stk_simulation.cli global-coverage --stk-mode running
+```
 
-- `compute_global_coverage` / `compute_gps_visibility`：只操作 STK 并返回数值结果。
-- `render_global_coverage` / `render_gps_visibility`：只负责绘图和保存。
-- `run_global_coverage` / `run_gps_visibility`：供命令行使用的完整入口。
+## 生成单文件 EXE
 
-## 目录
+先安装构建依赖：
+
+```powershell
+python -m pip install -r requirements-build.txt
+```
+
+然后执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+```
+
+生成文件：
 
 ```text
-app/            tkinter/ttk GUI、异步执行和公共界面组件
-simulations/    两个仿真的配置、业务流程和绘图
-stk_api/        STK 12.6 Object Model 公共封装
-utils/          通用数值和绘图工具
-setup_project.py  Python 路径入口
+Python/dist/STKSimulation.exe
 ```
+
+目标电脑不需要安装 Python，但仍需要安装并授权 STK Desktop 12.6。TLE
+文件放在 EXE 同级的 `data/` 目录；结果写入 EXE 同级的 `results/` 目录。
+
+## 工程结构
+
+```text
+src/stk_simulation/
+├── __main__.py                 统一 GUI 入口
+├── cli.py                      统一命令行入口
+├── app/
+│   ├── main_window.py          主窗口与功能导航
+│   ├── simulation_controller.py STK 固定工作线程
+│   ├── pages/                  两个功能页面
+│   ├── dialogs/                地面站编辑对话框
+│   └── widgets/                Matplotlib 结果视图
+├── simulations/                配置、计算流程和绘图
+├── stk/                        STK 12.6 Object Model 公共封装
+├── infrastructure/             运行路径
+└── utils/                      通用数值和绘图工具
+
+packaging/
+├── stk_simulation.spec         PyInstaller 构建配置
+└── build.ps1                   Windows 构建入口
+```
+
+所有 STK 对象都在同一个长期工作线程中创建和使用；Qt 主线程只负责界面
+显示。新增功能时，在 `simulations/` 增加业务模块、在 `app/pages/` 增加功能
+页，并在 `feature_registry.py` 注册。
