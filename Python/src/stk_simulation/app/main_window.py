@@ -29,7 +29,6 @@ class MainWindow(QMainWindow):
         self.resize(1480, 900)
         self.setMinimumSize(1180, 720)
 
-        self.controller = SimulationController(self)
         self.pages: dict[str, QWidget] = {}
         self._batch_requests: dict[str, bool] = {}
 
@@ -83,6 +82,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(content_host, 1)
         self.setCentralWidget(root)
 
+        self.controller = SimulationController(self)
         self.controller.busy_changed.connect(self._set_busy)
         self.controller.completed.connect(self._show_result)
         self.controller.failed.connect(self._show_error)

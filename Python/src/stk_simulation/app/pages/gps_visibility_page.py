@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
