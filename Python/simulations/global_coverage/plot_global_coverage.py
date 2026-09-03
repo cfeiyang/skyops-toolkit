@@ -26,12 +26,13 @@ def plot_global_coverage(result, config, axes=None):
     level_step, max_level = _nice_level_step(max_hour)
     levels = np.arange(0.0, max_level + level_step * 0.5, level_step)
 
+    # Basemap/PROJ 会把相差 360° 的首尾经度视为同一条经线。
+    # 全球网格不重复加入右端点，避免地图宽度退化为接近 0。
+    grid_longitudes = np.arange(
+        plot.lon_range[0], plot.lon_range[1], plot.interp_step
+    )
     longitude_grid, latitude_grid = np.meshgrid(
-        np.arange(
-            plot.lon_range[0],
-            plot.lon_range[1] + plot.interp_step * 0.5,
-            plot.interp_step,
-        ),
+        grid_longitudes,
         np.arange(
             plot.lat_range[0],
             plot.lat_range[1] + plot.interp_step * 0.5,
@@ -56,7 +57,7 @@ def plot_global_coverage(result, config, axes=None):
         lat_ts=30,
         lon_0=plot.center_lon,
         llcrnrlon=plot.lon_range[0],
-        urcrnrlon=plot.lon_range[1],
+        urcrnrlon=float(grid_longitudes[-1]),
         llcrnrlat=plot.lat_range[0],
         urcrnrlat=plot.lat_range[1],
         resolution="c",
@@ -119,16 +120,21 @@ def plot_global_coverage(result, config, axes=None):
             fontweight="bold",
         )
 
-    tick_x, _ = world_map(
-        np.asarray(plot.lon_ticks), np.zeros(len(plot.lon_ticks))
-    )
+    x_min = float(np.nanmin(x_grid))
+    x_max = float(np.nanmax(x_grid))
+    y_min = float(np.nanmin(y_grid))
+    y_max = float(np.nanmax(y_grid))
+    longitude_fraction = (
+        np.asarray(plot.lon_ticks, dtype=float) - plot.lon_range[0]
+    ) / (plot.lon_range[1] - plot.lon_range[0])
+    tick_x = x_min + longitude_fraction * (x_max - x_min)
     _, tick_y = world_map(
         np.full(len(plot.lat_ticks), plot.center_lon), np.asarray(plot.lat_ticks)
     )
     axes.set_xticks(tick_x, labels=plot.lon_tick_labels)
     axes.set_yticks(tick_y, labels=plot.lat_tick_labels)
-    axes.set_xlim(world_map.xmin, world_map.xmax)
-    axes.set_ylim(world_map.ymin, world_map.ymax)
+    axes.set_xlim(x_min, x_max)
+    axes.set_ylim(y_min, y_max)
     axes.set_aspect("equal", adjustable="box")
     axes.grid(True, linestyle=":", alpha=0.25)
     axes.set_xlabel("经度/°")
