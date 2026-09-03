@@ -6,14 +6,6 @@ import traceback
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from stk_simulation.simulations.global_coverage.service import (
-    compute_global_coverage,
-    run_global_coverage_batch,
-)
-from stk_simulation.simulations.gps_visibility.service import compute_gps_visibility
-from stk_simulation.stk.session import STKSession
-
-
 class STKWorker(QObject):
     completed = Signal(str, object)
     failed = Signal(str, str)
@@ -21,13 +13,22 @@ class STKWorker(QObject):
 
     def __init__(self) -> None:
         super().__init__()
-        self._session = STKSession()
+        self._session = None
 
     @Slot(str, object, bool)
     def run(self, feature_key: str, config, batch: bool) -> None:
         try:
+            if self._session is None:
+                from stk_simulation.stk.session import STKSession
+
+                self._session = STKSession()
             root = self._session.connect(config.stk.mode)
             if feature_key == "global_coverage":
+                from stk_simulation.simulations.global_coverage.service import (
+                    compute_global_coverage,
+                    run_global_coverage_batch,
+                )
+
                 if batch:
                     result = run_global_coverage_batch(
                         root,
@@ -37,6 +38,10 @@ class STKWorker(QObject):
                 else:
                     result = compute_global_coverage(root, config)
             elif feature_key == "gps_visibility":
+                from stk_simulation.simulations.gps_visibility.service import (
+                    compute_gps_visibility,
+                )
+
                 result = compute_gps_visibility(root, config)
             else:
                 raise ValueError(f"未知仿真功能：{feature_key}")
@@ -48,7 +53,9 @@ class STKWorker(QObject):
 
     @Slot()
     def release(self) -> None:
-        self._session.release()
+        if self._session is not None:
+            self._session.release()
+            self._session = None
 
 
 class SimulationController(QObject):

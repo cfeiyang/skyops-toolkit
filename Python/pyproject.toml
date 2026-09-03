@@ -17,12 +17,9 @@ dependencies = [
     "PySide6>=6.5,<7.0",
 ]
 
-[project.gui-scripts]
-stk-simulation = "stk_simulation.__main__:main"
-
 [project.scripts]
+stk-simulation = "stk_simulation.__main__:main"
 stk-simulation-cli = "stk_simulation.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

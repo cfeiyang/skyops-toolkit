@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
 
 from stk_simulation.app.widgets.plot_widget import PlotWidget
 from stk_simulation.simulations.gps_visibility.config import GPSVisibilityConfig
-from stk_simulation.simulations.gps_visibility.service import render_gps_visibility
 
 
 class GPSVisibilityPage(QWidget):
@@ -173,6 +172,10 @@ class GPSVisibilityPage(QWidget):
         self.status_label.setText(text)
 
     def show_result(self, result) -> None:
+        from stk_simulation.simulations.gps_visibility.service import (
+            render_gps_visibility,
+        )
+
         self.plot_widget.show_result(result, render_gps_visibility)
         self.set_status(f"完成 · {result.output.image_path}")
 

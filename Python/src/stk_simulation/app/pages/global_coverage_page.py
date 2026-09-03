@@ -33,7 +33,6 @@ from stk_simulation.simulations.global_coverage.presets import (
     satellite_template,
     station_template,
 )
-from stk_simulation.simulations.global_coverage.service import render_global_coverage
 
 
 SATELLITE_MODES = (("单星", "single"), ("三星", "multi"))
@@ -217,6 +216,10 @@ class GlobalCoveragePage(QWidget):
         self.status_label.setText(text)
 
     def show_result(self, result, batch: bool = False) -> None:
+        from stk_simulation.simulations.global_coverage.service import (
+            render_global_coverage,
+        )
+
         self.plot_widget.show_result(result, render_global_coverage)
         self.set_status(
             f"全部 8 组完成 · {result.output.result_dir}"
