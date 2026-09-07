@@ -68,6 +68,7 @@ Python/
 │   ├── __init__.py                        Python 包标识
 │   ├── __main__.py                        GUI 模块入口
 │   ├── cli.py                             命令行入口
+│   ├── assets/app_icon.ico                窗口与 EXE 共用图标
 │   ├── app/
 │   │   ├── application.py                 QApplication、字体和样式
 │   │   ├── main_window.py                 单功能主窗口
@@ -417,6 +418,8 @@ python -m pip install "C:\Program Files\AGI\STK 12\bin\AgPythonAPI\agi.stk12-12.
 ### 17.4 构建依赖
 
 `requirements-build.txt` 在运行依赖基础上增加 `pyinstaller>=6.0,<7.0`。只有打包电脑需要 PyInstaller。
+
+`src/stk_simulation/assets/app_icon.ico` 同时用于 Qt 窗口左上角图标和 Windows EXE 文件图标；PyInstaller spec 会将它收集到单文件程序中。
 
 新增第三方 import 时：
 

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 
 from stk_simulation.app.main_window import MainWindow
 from stk_simulation.utils.plotting import configure_chinese_font
+
+
+APP_ICON = Path(__file__).resolve().parents[1] / "assets" / "app_icon.ico"
 
 
 STYLE_SHEET = """
@@ -88,10 +92,13 @@ QPushButton:hover {
 def run_application() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("STK 全球覆盖通信时长仿真")
+    app_icon = QIcon(str(APP_ICON))
+    app.setWindowIcon(app_icon)
     app.setStyle("Fusion")
     font_name = configure_chinese_font()
     app.setFont(QFont(font_name, 10))
     app.setStyleSheet(STYLE_SHEET)
     window = MainWindow()
+    window.setWindowIcon(app_icon)
     window.show()
     return app.exec()

@@ -5,10 +5,12 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 project_root = Path(SPEC).resolve().parents[1]
 source_root = project_root / "src"
+app_icon = source_root / "stk_simulation" / "assets" / "app_icon.ico"
 
 stk_datas, stk_binaries, stk_hiddenimports = collect_all("agi.stk12")
 datas = list(stk_datas)
 datas += collect_data_files("mpl_toolkits.basemap_data")
+datas.append((str(app_icon), "stk_simulation/assets"))
 
 a = Analysis(
     [str(source_root / "stk_simulation" / "__main__.py")],
@@ -37,5 +39,5 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
+    icon=str(app_icon),
 )
-
