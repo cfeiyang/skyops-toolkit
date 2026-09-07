@@ -56,7 +56,7 @@ global_coverage/plot.py ────► GUI 图像和 PNG
 ```text
 Python/
 ├── data/                                  输入数据，不提交 Git
-│   └── TN1A_LATEST.tle                    自动下载的参考星缓存
+│   └── 59705_LATEST.tle                   自动下载的参考星缓存
 ├── results/                               运行结果，不提交 Git
 │   └── global_coverage/
 ├── docs/
@@ -82,7 +82,7 @@ Python/
 │   │   ├── common.py                      公共配置和输出类型
 │   │   └── global_coverage/
 │   │       ├── config.py                  默认配置
-│   │       ├── presets.py                 文档站址、TLE 解析和三星派生
+│   │       ├── presets.py                 文档站址和三星轨道派生
 │   │       ├── service.py                 计算、批量方案和对比
 │   │       └── plot.py                    全球通信时长图
 │   ├── stk/
@@ -93,7 +93,6 @@ Python/
 │   │   ├── coverage.py                    Coverage 与 FOM
 │   │   └── data.py                        Data Provider 数据转换
 │   └── utils/
-│       ├── geo.py                         度分秒转换
 │       └── plotting.py                    中文字体、色图和图片保存
 ├── pyproject.toml                         包元数据和运行依赖
 ├── requirements.txt                       运行依赖清单
@@ -174,7 +173,7 @@ STK 会话在工作线程中延迟创建并复用。Qt 主线程不直接持有 
 - 时长梯度：固定 1 小时；
 - 等值线标签：直接显示 `1 h`、`2 h` 等时长。
 
-GUI 可以修改场景时间、TLE 在线地址、SSC、传播步长、卫星模式、Coverage 参数、规避开关和全部地面站参数。
+GUI 可以修改场景时间、TLE 在线地址、SSC、传播步长、卫星模式、Coverage 参数、规避开关和全部地面站参数。所有数值控件直接显示单位；地面站海拔在界面中使用米，进入 STK 前自动转换为千米。
 
 ## 8. 文档规定的五个地面站
 
@@ -192,7 +191,7 @@ GUI 可以修改场景时间、TLE 在线地址、SSC、传播步长、卫星模
 - `domestic`：四个国内基本站；
 - `all`：四个国内基本站加墨西哥规划站。
 
-用户仍然可以通过界面增加、删除或修改站址，表格中的每一行都会参与当前仿真。
+用户仍然可以通过界面增加、删除或修改站址，表格中的每一行都会参与当前仿真。坐标使用十进制度，北纬和东经为正、南纬和西经为负；海拔单位为米。
 
 ## 9. 三星如何从参考星 TLE 生成
 
@@ -202,13 +201,13 @@ GUI 可以修改场景时间、TLE 在线地址、SSC、传播步长、卫星模
 https://celestrak.org/NORAD/elements/gp.php?CATNR=59705&FORMAT=TLE
 ```
 
-CelesTrak 的 `FORMAT=TLE` 返回三行格式：卫星名称行、TLE Line 1、TLE Line 2。程序验证两行的 SSC 和标准行长度后，以原子替换方式写入 `data/TN1A_LATEST.tle`。网络请求失败时，只在现有缓存仍能通过相同校验的情况下继续运行。
+CelesTrak 的 `FORMAT=TLE` 返回三行格式：卫星名称行、TLE Line 1、TLE Line 2。`infrastructure/tle.py` 一次完成下载、SSC 校验和轨道根数解析，并以原子替换方式写入 `data/59705_LATEST.tle`。缓存只是自动更新和 STK SGP4 导入所需的内部文件，不再作为人工配置的数据源。网络请求失败时，只在现有缓存仍能通过相同校验的情况下继续运行。
 
 程序先检查缓存修改时间：两小时内的有效缓存直接使用，超过两小时才尝试在线更新；“文档全部方案”的三个 STK 场景共用同一份下载结果。这样既能自动取得最新发布的数据，也符合 CelesTrak GP 数据约两小时更新一次、不要重复请求的 [使用政策](https://celestrak.org/usage-policy.php)。接口和返回格式见官方的 [GP 数据格式说明](https://celestrak.org/NORAD/documentation/gp-data-formats.php)。
 
 单星模式调用 STK SGP4 的 `AddSegsFromFile()`，从缓存文件中加载 SSC 对应卫星。
 
-三星模式先用同一 TLE 创建参考星，再解析同一个 SSC 的两行根数，并按文档生成第二、第三颗卫星：
+三星模式直接使用本次在线更新时已经解析的结构化根数，按文档生成第二、第三颗卫星，不再由业务层重复读取和解析缓存文件：
 
 | 卫星 | RAAN | 平近点角 M | 其他根数 |
 |---|---|---|---|
@@ -311,6 +310,15 @@ IncreaseHour = max(FiveStationHour - DomesticHour, 0)
 ```
 
 只显示正增量区域，用于观察海外规划站增加的覆盖范围和时长。
+
+除了批量运行文档方案，GUI 还支持按需计算任意选中站的增益。普通“开始仿真”只计算当前方案，不会产生额外计算。用户在地面站表格中选中一行并点击“计算选中站增益”后，程序执行：
+
+1. 从当前站表中暂时移除选中站，计算基准结果；
+2. 使用完整站表计算加入后的结果；
+3. 按相同经纬度网格计算非负时长差值；
+4. 在“加入前”“加入后”“增益”三个结果标签页中显示，默认打开增益页。
+
+增益摘要包含最大时长增益、受益区域的面积加权平均增益、新增覆盖比例和近似新增覆盖面积。覆盖比例使用纬度余弦对全球网格点进行面积加权，面积按地球表面积约 `510,072,000 km²` 换算。
 
 ## 14. 绘图逻辑
 
@@ -433,7 +441,7 @@ stk-simulation
 确认 `python` 和 `pip` 都属于同一个 `stk` 环境。首次仿真会自动创建：
 
 ```text
-Python/data/TN1A_LATEST.tle
+Python/data/59705_LATEST.tle
 ```
 
 首次运行需要访问 CelesTrak；以后网络不可用时可以继续使用已校验的缓存。
@@ -515,7 +523,7 @@ STKSimulation-1.0.0/
 └── 使用说明.md
 ```
 
-目标电脑不需要 Python，但必须安装并授权 STK Desktop 12.6，首次运行应能访问 CelesTrak，并且发布目录必须具有创建 `data/`、`results/` 和写入文件的权限。需要离线发布时，可以把构建电脑已经下载的 `data/TN1A_LATEST.tle` 一起交付。
+目标电脑不需要 Python，但必须安装并授权 STK Desktop 12.6，首次运行应能访问 CelesTrak，并且发布目录必须具有创建 `data/`、`results/` 和写入文件的权限。需要离线发布时，可以把构建电脑已经下载的 `data/59705_LATEST.tle` 一起交付。
 
 ## 22. 新增其他仿真功能
 
@@ -570,7 +578,7 @@ render_*()    绘图和保存
 
 ### CelesTrak 下载失败
 
-如果已经存在有效的 `data/TN1A_LATEST.tle`，程序会自动使用缓存；如果是首次运行，则需要检查目标电脑对 `https://celestrak.org` 的 HTTPS 访问。
+如果已经存在有效的 `data/59705_LATEST.tle`，程序会自动使用缓存；如果是首次运行，则需要检查目标电脑对 `https://celestrak.org` 的 HTTPS 访问。
 
 ### TLE 中没有指定 SSC
 

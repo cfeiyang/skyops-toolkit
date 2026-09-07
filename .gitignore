@@ -1,5 +1,5 @@
 # ============================================================
-# MATLAB 工程 .gitignore
+# STKSimulation 工程 .gitignore
 # ============================================================
 
 # ---- MATLAB 自动生成 / 临时文件 ----
@@ -34,6 +34,7 @@ Python/*.egg-info/
 Python/src/*.egg-info/
 
 # ---- 系统 / 编辑器 ----
+.idea/
 Thumbs.db
 Desktop.ini
 .DS_Store

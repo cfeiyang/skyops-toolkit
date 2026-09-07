@@ -32,6 +32,13 @@ QMainWindow, QWidget {
 #connectionStatus, #statusLabel, #hintLabel {
     color: #667085;
 }
+#gainSummary {
+    background: #eef6ff;
+    border: 1px solid #b9d7f5;
+    border-radius: 6px;
+    color: #174f7c;
+    padding: 8px 12px;
+}
 QGroupBox {
     background: white;
     border: 1px solid #dce2ea;

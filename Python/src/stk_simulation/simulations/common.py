@@ -1,4 +1,4 @@
-"""两个仿真共享的配置与输出数据结构。"""
+"""仿真配置与输出数据结构。"""
 
 from __future__ import annotations
 
@@ -38,8 +38,7 @@ class SatelliteConfig:
     name: str
     ssc: int
     step: float
-    tle_file: Path
-    tle_url: str = ""
+    tle_url: str
 
 
 @dataclass

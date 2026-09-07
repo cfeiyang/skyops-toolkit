@@ -12,12 +12,12 @@ import pandas as pd
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
-from stk_simulation.infrastructure.tle import refresh_tle_cache
+from stk_simulation.infrastructure.tle import TLEData, load_latest_tle
 from stk_simulation.simulations.common import OutputResult
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.plot import plot_global_coverage
 from stk_simulation.simulations.global_coverage.presets import (
-    satellites_from_reference_tle,
+    derived_satellite_elements,
     station_template,
 )
 from stk_simulation.stk.chain import STKChain
@@ -37,6 +37,15 @@ class GlobalCoverageSummary:
 
 
 @dataclass
+class CoverageGainSummary:
+    station_name: str
+    max_hour: float
+    mean_positive_hour: float
+    new_coverage_percent: float
+    new_coverage_area_km2: float
+
+
+@dataclass
 class GlobalCoverageResult:
     coverage_data: pd.DataFrame
     satellite_tracks: list[tuple[np.ndarray, np.ndarray]]
@@ -44,24 +53,27 @@ class GlobalCoverageResult:
     output: OutputResult
     cfg: GlobalCoverageConfig
     additional_images: tuple[Path, ...] = field(default_factory=tuple)
+    comparison_results: tuple[tuple[str, "GlobalCoverageResult"], ...] = field(
+        default_factory=tuple
+    )
+    gain_summary: CoverageGainSummary | None = None
 
 
 def compute_global_coverage(
     root,
     config: GlobalCoverageConfig,
     *,
-    refresh_tle: bool = True,
+    tle: TLEData | None = None,
 ) -> GlobalCoverageResult:
     """创建 STK 场景并提取绘图所需的全部数值，不操作 GUI。"""
-    if refresh_tle:
-        _refresh_reference_tle(config)
+    tle = tle or _load_reference_tle(config)
     scenario = STKSession.create_scenario(
         root,
         config.scenario.name,
         config.scenario.start_time,
         config.scenario.stop_time,
     )
-    satellites = _create_satellites(root, scenario, config)
+    satellites = _create_satellites(root, scenario, config, tle)
 
     facilities = []
     for station in config.stations:
@@ -158,7 +170,7 @@ def run_document_scenarios(
 ) -> GlobalCoverageResult:
     """运行 Word 文档规定的三组场景，并输出海外站覆盖增量图。"""
     _report(progress, "正在从 CelesTrak 更新参考星 TLE...")
-    _refresh_reference_tle(base_config)
+    tle = _load_reference_tle(base_config)
     jobs = (
         ("single", "single", "单星临港", "global_coverage_1sat_1station.png"),
         (
@@ -185,13 +197,18 @@ def run_document_scenarios(
         config.satellite_group.mode = satellite_mode
         config.stations = station_template(station_mode)
         config.output.image_name = image_name
-        result = compute_global_coverage(root, config, refresh_tle=False)
+        result = compute_global_coverage(root, config, tle=tle)
         _render_offscreen(result)
         results[station_mode] = result
         image_paths.append(result.output.image_path)
 
     _report(progress, "文档方案 4/4：计算墨西哥站覆盖增量")
-    comparison = _coverage_increase(results["domestic"], results["all"])
+    comparison = _coverage_increase(
+        results["domestic"],
+        results["all"],
+        "Mexico",
+        "global_coverage_3sat_mexico_increase.png",
+    )
     _render_offscreen(comparison)
     image_paths.append(comparison.output.image_path)
 
@@ -201,41 +218,143 @@ def run_document_scenarios(
     return expanded
 
 
+def run_station_gain(
+    root,
+    base_config: GlobalCoverageConfig,
+    progress: Callable[[str], None] | None = None,
+) -> GlobalCoverageResult:
+    """计算当前站表中指定新增站带来的覆盖时长增益。"""
+    station_name = base_config.comparison_station_name.strip()
+    matches = [
+        station
+        for station in base_config.stations
+        if station.name.casefold() == station_name.casefold()
+    ]
+    if len(matches) != 1:
+        raise ValueError("请选择一个有效且名称唯一的增益对比站。")
+    if len(base_config.stations) < 2:
+        raise ValueError("计算新增站增益时，至少需要一个基准站和一个新增站。")
+
+    _report(progress, f"正在准备 {station_name} 增益对比...")
+    tle = _load_reference_tle(base_config)
+    token = _file_token(station_name)
+    satellite_count = 1 if base_config.satellite_group.mode == "single" else 3
+    prefix = f"global_coverage_{satellite_count}sat"
+
+    baseline_config = copy.deepcopy(base_config)
+    baseline_config.scenario.name = f"{base_config.scenario.name}_Without_{token}"
+    baseline_config.stations = [
+        station
+        for station in baseline_config.stations
+        if station.name.casefold() != station_name.casefold()
+    ]
+    baseline_config.output.image_name = f"{prefix}_without_{token}.png"
+    _report(progress, f"正在计算不含 {station_name} 的基准方案...")
+    baseline = compute_global_coverage(root, baseline_config, tle=tle)
+
+    expanded_config = copy.deepcopy(base_config)
+    expanded_config.scenario.name = f"{base_config.scenario.name}_With_{token}"
+    expanded_config.output.image_name = f"{prefix}_with_{token}.png"
+    _report(progress, f"正在计算加入 {station_name} 后的方案...")
+    expanded = compute_global_coverage(root, expanded_config, tle=tle)
+
+    increase = _coverage_increase(
+        baseline,
+        expanded,
+        station_name,
+        f"{prefix}_{token}_increase.png",
+    )
+    expanded.comparison_results = (
+        (f"加入前（{len(baseline_config.stations)}站）", baseline),
+        (f"加入后（{len(expanded_config.stations)}站）", expanded),
+        (f"增益（{station_name}）", increase),
+    )
+    expanded.additional_images = tuple(
+        result.output.image_path for _, result in expanded.comparison_results
+    )
+    expanded.gain_summary = increase.gain_summary
+    _report(progress, f"{station_name} 覆盖增益计算完成")
+    return expanded
+
+
 def _coverage_increase(
-    domestic: GlobalCoverageResult,
+    baseline_result: GlobalCoverageResult,
     expanded: GlobalCoverageResult,
+    station_name: str,
+    image_name: str,
 ) -> GlobalCoverageResult:
     keys = ["LatitudeDeg", "LongitudeDeg"]
-    baseline = domestic.coverage_data[keys + ["TimeHour"]].rename(
-        columns={"TimeHour": "DomesticHour"}
+    baseline = baseline_result.coverage_data[keys + ["TimeHour"]].rename(
+        columns={"TimeHour": "BaselineHour"}
     )
     total = expanded.coverage_data[keys + ["TimeHour"]].rename(
         columns={"TimeHour": "ExpandedHour"}
     )
     increase = baseline.merge(total, on=keys, how="outer").fillna(0.0)
     increase["TimeHour"] = np.maximum(
-        increase["ExpandedHour"] - increase["DomesticHour"], 0.0
+        increase["ExpandedHour"] - increase["BaselineHour"], 0.0
     )
     increase["TimeSec"] = increase["TimeHour"] * 3600.0
 
     config = copy.deepcopy(expanded.cfg)
-    config.output.image_name = "global_coverage_3sat_mexico_increase.png"
-    config.plot.title = "墨西哥规划站带来的三星全球通信时长增量"
+    config.output.image_name = image_name
+    config.plot.title = f"{station_name} 带来的全球通信时长增量"
     config.plot.colorbar_label = "通信时长增量 / h"
     image_path = config.paths.result_dir / config.output.image_name
+    gain_summary = _gain_summary(increase, station_name)
     return GlobalCoverageResult(
         coverage_data=increase[keys + ["TimeSec", "TimeHour"]],
         satellite_tracks=expanded.satellite_tracks,
         summary=GlobalCoverageSummary(
-            satellite_count=3,
-            station_count=5,
+            satellite_count=expanded.summary.satellite_count,
+            station_count=expanded.summary.station_count,
             max_hour=float(increase["TimeHour"].max(skipna=True)),
         ),
         output=OutputResult(
             config.paths.result_dir, config.output.image_name, image_path
         ),
         cfg=config,
+        gain_summary=gain_summary,
     )
+
+
+def _gain_summary(data: pd.DataFrame, station_name: str) -> CoverageGainSummary:
+    gain = data["TimeHour"].to_numpy(dtype=float)
+    latitude = data["LatitudeDeg"].to_numpy(dtype=float)
+    baseline = data["BaselineHour"].to_numpy(dtype=float)
+    expanded = data["ExpandedHour"].to_numpy(dtype=float)
+    weights = np.maximum(np.cos(np.deg2rad(latitude)), 0.0)
+    positive = np.isfinite(gain) & (gain > 0.0)
+    newly_covered = (baseline <= 0.0) & (expanded > 0.0)
+    total_weight = float(weights.sum())
+    new_percent = (
+        float(weights[newly_covered].sum()) / total_weight * 100.0
+        if total_weight > 0.0
+        else 0.0
+    )
+    positive_weight = float(weights[positive].sum())
+    mean_positive = (
+        float(np.average(gain[positive], weights=weights[positive]))
+        if positive_weight > 0.0
+        else 0.0
+    )
+    return CoverageGainSummary(
+        station_name=station_name,
+        max_hour=float(np.nanmax(gain)) if gain.size else 0.0,
+        mean_positive_hour=mean_positive,
+        new_coverage_percent=new_percent,
+        new_coverage_area_km2=510_072_000.0 * new_percent / 100.0,
+    )
+
+
+def _file_token(value: str) -> str:
+    token = "_".join(value.strip().lower().split())
+    cleaned = "".join(
+        character
+        for character in token
+        if character.isalnum() or character == "_"
+    )
+    return cleaned or "station"
 
 
 def _render_offscreen(result: GlobalCoverageResult) -> None:
@@ -246,7 +365,7 @@ def _render_offscreen(result: GlobalCoverageResult) -> None:
 
 
 def _create_satellites(
-    root, scenario, config: GlobalCoverageConfig
+    root, scenario, config: GlobalCoverageConfig, tle: TLEData
 ) -> list[Any]:
     reference = STKObjects.create_satellite_from_tle(
         root,
@@ -254,29 +373,24 @@ def _create_satellites(
         config.satellite.name,
         config.satellite.ssc,
         config.satellite.step,
-        config.satellite.tle_file,
+        tle.path,
     )
     if config.satellite_group.mode == "single":
         return [reference]
 
-    elements = satellites_from_reference_tle(
-        config.satellite.tle_file,
-        config.satellite.ssc,
-        config.satellite.name,
-        config.satellite.step,
-    )
+    elements = derived_satellite_elements(tle, config.satellite.step)
     satellites = [reference]
     satellites.extend(
         STKObjects.create_satellite_from_elements(root, scenario, satellite_config)
-        for satellite_config in elements[1:]
+        for satellite_config in elements
     )
     return satellites
 
 
-def _refresh_reference_tle(config: GlobalCoverageConfig) -> None:
-    config.satellite.tle_file = refresh_tle_cache(
+def _load_reference_tle(config: GlobalCoverageConfig) -> TLEData:
+    return load_latest_tle(
         config.satellite.tle_url,
-        config.satellite.tle_file,
+        config.paths.data_dir,
         config.satellite.ssc,
     )
 

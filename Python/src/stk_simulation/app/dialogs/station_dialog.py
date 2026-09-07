@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
     QLineEdit,
     QMessageBox,
@@ -24,17 +25,25 @@ class StationDialog(QDialog):
         self.setMinimumWidth(380)
 
         self.name_field = QLineEdit(station.name)
-        self.lat_field = QLineEdit(f"{station.lat:.8g}")
-        self.lon_field = QLineEdit(f"{station.lon:.8g}")
-        self.alt_field = QLineEdit(f"{station.alt:g}")
-        self.elevation_field = QLineEdit(f"{station.min_elevation:g}")
+        self.lat_field = _number_field(
+            station.lat, -90.0, 90.0, 6, 0.0001, " °"
+        )
+        self.lon_field = _number_field(
+            station.lon, -180.0, 180.0, 6, 0.0001, " °"
+        )
+        self.alt_field = _number_field(
+            station.alt * 1000.0, -1000.0, 100000.0, 2, 1.0, " m"
+        )
+        self.elevation_field = _number_field(
+            station.min_elevation, 0.0, 90.0, 2, 1.0, " °"
+        )
 
         form = QFormLayout()
         form.addRow("地面站名称", self.name_field)
-        form.addRow("纬度 / °", self.lat_field)
-        form.addRow("经度 / °", self.lon_field)
-        form.addRow("高度 / km", self.alt_field)
-        form.addRow("最低仰角 / °", self.elevation_field)
+        form.addRow("纬度（北正南负）", self.lat_field)
+        form.addRow("经度（东正西负）", self.lon_field)
+        form.addRow("海拔高度", self.alt_field)
+        form.addRow("最低仰角", self.elevation_field)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -58,24 +67,32 @@ class StationDialog(QDialog):
         return dialog.result
 
     def _accept(self) -> None:
-        try:
-            station = StationConfig(
-                name=self.name_field.text().strip(),
-                lat=float(self.lat_field.text()),
-                lon=float(self.lon_field.text()),
-                alt=float(self.alt_field.text()),
-                min_elevation=float(self.elevation_field.text()),
-            )
-            if not station.name:
-                raise ValueError("地面站名称不能为空。")
-            if not -90.0 <= station.lat <= 90.0:
-                raise ValueError("纬度必须在 -90° 到 90° 之间。")
-            if not -180.0 <= station.lon <= 180.0:
-                raise ValueError("经度必须在 -180° 到 180° 之间。")
-            if not 0.0 <= station.min_elevation <= 90.0:
-                raise ValueError("最低仰角必须在 0° 到 90° 之间。")
-        except ValueError as error:
-            QMessageBox.critical(self, "参数错误", str(error))
+        name = self.name_field.text().strip()
+        if not name:
+            QMessageBox.critical(self, "参数错误", "地面站名称不能为空。")
             return
-        self.result = station
+        self.result = StationConfig(
+            name=name,
+            lat=self.lat_field.value(),
+            lon=self.lon_field.value(),
+            alt=self.alt_field.value() / 1000.0,
+            min_elevation=self.elevation_field.value(),
+        )
         self.accept()
+
+
+def _number_field(
+    value: float,
+    minimum: float,
+    maximum: float,
+    decimals: int,
+    step: float,
+    suffix: str,
+) -> QDoubleSpinBox:
+    field = QDoubleSpinBox()
+    field.setRange(minimum, maximum)
+    field.setDecimals(decimals)
+    field.setSingleStep(step)
+    field.setSuffix(suffix)
+    field.setValue(value)
+    return field

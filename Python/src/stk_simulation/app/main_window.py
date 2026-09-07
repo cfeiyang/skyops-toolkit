@@ -25,7 +25,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("STK 全球覆盖通信时长仿真")
         self.resize(1420, 900)
         self.setMinimumSize(1120, 720)
-        self._document_scenarios_requested = False
+        self._run_mode = "normal"
 
         self.stk_mode = QComboBox()
         self.stk_mode.addItem("新建 STK", "new")
@@ -60,12 +60,12 @@ class MainWindow(QMainWindow):
         self.controller.failed.connect(self._show_error)
         self.controller.status_changed.connect(self.page.set_status)
 
-    def _start(self, config, document_scenarios: bool) -> None:
+    def _start(self, config, run_mode: str) -> None:
         try:
             config.stk.mode = str(self.stk_mode.currentData())
-            self._document_scenarios_requested = document_scenarios
+            self._run_mode = run_mode
             self.connection_status.setText("正在连接或计算...")
-            self.controller.start(config, document_scenarios)
+            self.controller.start(config, run_mode)
         except Exception as error:
             QMessageBox.critical(self, "无法开始仿真", str(error))
 
@@ -76,11 +76,11 @@ class MainWindow(QMainWindow):
             self.connection_status.setText("STK 已连接")
 
     def _show_result(self, result) -> None:
-        self.page.show_result(result, self._document_scenarios_requested)
-        self._document_scenarios_requested = False
+        self.page.show_result(result, self._run_mode)
+        self._run_mode = "normal"
 
     def _show_error(self, message: str) -> None:
-        self._document_scenarios_requested = False
+        self._run_mode = "normal"
         self.connection_status.setText("STK 连接或仿真失败")
         self.page.set_status("仿真失败")
         QMessageBox.critical(self, "仿真错误", message)

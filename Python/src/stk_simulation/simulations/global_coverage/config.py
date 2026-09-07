@@ -79,6 +79,7 @@ class GlobalCoverageConfig:
     fom: FomConfig
     output: OutputConfig
     plot: GlobalPlotConfig
+    comparison_station_name: str = ""
 
 
 def config_global_coverage() -> GlobalCoverageConfig:
@@ -96,7 +97,6 @@ def config_global_coverage() -> GlobalCoverageConfig:
             name="TN01A",
             ssc=59705,
             step=60,
-            tle_file=paths.data_dir / "TN1A_LATEST.tle",
             tle_url=(
                 "https://celestrak.org/NORAD/elements/"
                 "gp.php?CATNR=59705&FORMAT=TLE"

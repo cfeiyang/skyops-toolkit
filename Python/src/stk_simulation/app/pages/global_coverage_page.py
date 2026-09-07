@@ -46,7 +46,7 @@ STATION_PRESETS = (
 
 
 class GlobalCoveragePage(QWidget):
-    run_requested = Signal(object, bool)
+    run_requested = Signal(object, str)
 
     def __init__(
         self, config: GlobalCoverageConfig, parent: QWidget | None = None
@@ -61,14 +61,17 @@ class GlobalCoveragePage(QWidget):
 
         self.run_button = QPushButton("开始仿真")
         self.run_button.setObjectName("primaryButton")
-        self.run_button.clicked.connect(lambda: self._request_run(False))
+        self.run_button.clicked.connect(lambda: self._request_run("normal"))
+        self.gain_button = QPushButton("计算选中站增益")
+        self.gain_button.clicked.connect(self._request_gain)
         self.run_all_button = QPushButton("运行文档全部方案")
-        self.run_all_button.clicked.connect(lambda: self._request_run(True))
+        self.run_all_button.clicked.connect(lambda: self._request_run("document"))
         self.status_label = QLabel("就绪")
         self.status_label.setObjectName("statusLabel")
 
         actions = QHBoxLayout()
         actions.addWidget(self.run_button)
+        actions.addWidget(self.gain_button)
         actions.addWidget(self.run_all_button)
         actions.addStretch(1)
         actions.addWidget(self.status_label)
@@ -79,10 +82,21 @@ class GlobalCoveragePage(QWidget):
         parameter_layout.addWidget(self.tabs)
         parameter_layout.addLayout(actions)
 
-        self.plot_widget = PlotWidget()
+        self.result_tabs = QTabWidget()
+        self.result_tabs.setDocumentMode(True)
+        self._plot_widgets: list[PlotWidget] = []
+        self._replace_result_tabs((("仿真结果", None),))
+        self.gain_summary_label = QLabel()
+        self.gain_summary_label.setObjectName("gainSummary")
+        self.gain_summary_label.setVisible(False)
+        result_panel = QWidget()
+        result_layout = QVBoxLayout(result_panel)
+        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_layout.addWidget(self.gain_summary_label)
+        result_layout.addWidget(self.result_tabs, 1)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(parameter_panel)
-        splitter.addWidget(self.plot_widget)
+        splitter.addWidget(result_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 560])
@@ -104,11 +118,11 @@ class GlobalCoveragePage(QWidget):
         scenario_group = QGroupBox("场景")
         scenario_group.setLayout(scenario_form)
 
-        self.resolution_field = _double_spin(0.1, 10.0, 0.1, 3)
-        self.min_elevation_field = _double_spin(0.0, 90.0, 1.0, 2)
+        self.resolution_field = _double_spin(0.1, 10.0, 0.1, 3, " °")
+        self.min_elevation_field = _double_spin(0.0, 90.0, 1.0, 2, " °")
         coverage_form = QFormLayout()
-        coverage_form.addRow("网格分辨率 / °", self.resolution_field)
-        coverage_form.addRow("网格最低仰角 / °", self.min_elevation_field)
+        coverage_form.addRow("网格分辨率", self.resolution_field)
+        coverage_form.addRow("网格最低仰角", self.min_elevation_field)
         coverage_group = QGroupBox("全球覆盖")
         coverage_group.setLayout(coverage_form)
 
@@ -133,7 +147,9 @@ class GlobalCoveragePage(QWidget):
         )
         self.ssc_field = QSpinBox()
         self.ssc_field.setRange(1, 999999999)
-        self.satellite_step_field = _double_spin(1.0, 86400.0, 1.0, 2)
+        self.satellite_step_field = _double_spin(
+            1.0, 86400.0, 1.0, 2, " s"
+        )
         self.tle_url_field = QLineEdit()
         self.ssc_field.valueChanged.connect(self._sync_tle_url)
 
@@ -142,19 +158,21 @@ class GlobalCoveragePage(QWidget):
         satellite_form.addRow("当前卫星", self.satellite_summary)
         satellite_form.addRow("参考星名称", self.satellite_name_field)
         satellite_form.addRow("参考星 SSC", self.ssc_field)
-        satellite_form.addRow("传播步长 / s", self.satellite_step_field)
+        satellite_form.addRow("传播步长", self.satellite_step_field)
         satellite_form.addRow("TLE 在线地址", self.tle_url_field)
         satellite_group = QGroupBox("轨道与三星偏置")
         satellite_group.setLayout(satellite_form)
 
         self.avoidance_enabled_field = QCheckBox("启用视线太阳干扰规避")
-        self.avoidance_angle_field = _double_spin(0.0, 180.0, 1.0, 2)
+        self.avoidance_angle_field = _double_spin(
+            0.0, 180.0, 1.0, 2, " °"
+        )
         self.avoidance_enabled_field.toggled.connect(
             self.avoidance_angle_field.setEnabled
         )
         avoidance_form = QFormLayout()
         avoidance_form.addRow(self.avoidance_enabled_field)
-        avoidance_form.addRow("规避角度 / °", self.avoidance_angle_field)
+        avoidance_form.addRow("规避角度", self.avoidance_angle_field)
         avoidance_group = QGroupBox("干扰规避")
         avoidance_group.setLayout(avoidance_form)
 
@@ -200,7 +218,7 @@ class GlobalCoveragePage(QWidget):
 
         self.station_table = QTableWidget(0, 5)
         self.station_table.setHorizontalHeaderLabels(
-            ("地面站", "纬度 / °", "经度 / °", "高度 / km", "最低仰角 / °")
+            ("地面站", "纬度 / °", "经度 / °", "海拔 / m", "最低仰角 / °")
         )
         self.station_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -220,7 +238,9 @@ class GlobalCoveragePage(QWidget):
             lambda _row, _column: self._edit_selected_station()
         )
 
-        hint = QLabel("表格中的每个地面站都会参与仿真；双击一行可编辑参数。")
+        hint = QLabel(
+            "表格中的每个地面站都会参与仿真；选中一行后可计算该站带来的覆盖增益。"
+        )
         hint.setObjectName("hintLabel")
         layout = QVBoxLayout(tab)
         layout.addLayout(toolbar)
@@ -273,37 +293,81 @@ class GlobalCoveragePage(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         self.run_button.setEnabled(not busy)
+        self.gain_button.setEnabled(not busy)
         self.run_all_button.setEnabled(not busy)
         self.tabs.setEnabled(not busy)
-        self.plot_widget.set_busy(busy)
+        for plot_widget in self._plot_widgets:
+            plot_widget.set_busy(busy)
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
 
-    def show_result(self, result, document_scenarios: bool = False) -> None:
+    def show_result(self, result, run_mode: str = "normal") -> None:
         from stk_simulation.simulations.global_coverage.service import (
             render_global_coverage,
         )
 
-        self.plot_widget.show_result(result, render_global_coverage)
-        self.set_status(
-            f"文档全部方案完成 · {result.output.result_dir}"
-            if document_scenarios
-            else f"完成 · {result.output.image_path}"
+        views = result.comparison_results or (("仿真结果", result),)
+        self._replace_result_tabs(
+            views,
+            render_global_coverage,
+            current_index=2 if run_mode == "gain" else 0,
         )
+        if run_mode == "document":
+            self.gain_summary_label.setVisible(False)
+            self.set_status(f"文档全部方案完成 · {result.output.result_dir}")
+        elif run_mode == "gain":
+            gain = result.gain_summary
+            if gain is None:
+                raise RuntimeError("增益结果缺少统计摘要。")
+            self.gain_summary_label.setText(
+                f"新增站：{gain.station_name}　"
+                f"最大时长增益：{gain.max_hour:.3f} h　"
+                f"受益区域平均增益：{gain.mean_positive_hour:.3f} h　"
+                f"新增覆盖：{gain.new_coverage_percent:.3f}% "
+                f"（约 {gain.new_coverage_area_km2:,.0f} km²）"
+            )
+            self.gain_summary_label.setVisible(True)
+            self.set_status(
+                f"{gain.station_name} 增益完成 · 最大增加 {gain.max_hour:.3f} h"
+            )
+        else:
+            self.gain_summary_label.setVisible(False)
+            self.set_status(f"完成 · {result.output.image_path}")
 
-    def _request_run(self, document_scenarios: bool) -> None:
+    def _request_run(self, run_mode: str) -> None:
         try:
             config = self.read_config()
         except Exception as error:
             QMessageBox.critical(self, "参数错误", str(error))
             return
-        self.set_status(
-            "准备运行文档全部方案..."
-            if document_scenarios
-            else "准备连接 STK..."
+        self._submit(config, run_mode)
+
+    def _request_gain(self) -> None:
+        selected_rows = sorted(
+            {index.row() for index in self.station_table.selectedIndexes()}
         )
-        self.run_requested.emit(config, document_scenarios)
+        if len(selected_rows) != 1:
+            QMessageBox.information(
+                self, "计算地面站增益", "请先在地面站表格中选择一个新增站。"
+            )
+            return
+        try:
+            config = self.read_config()
+        except Exception as error:
+            QMessageBox.critical(self, "参数错误", str(error))
+            return
+        config.comparison_station_name = config.stations[selected_rows[0]].name
+        self._submit(config, "gain")
+
+    def _submit(self, config: GlobalCoverageConfig, run_mode: str) -> None:
+        status = {
+            "normal": "准备连接 STK...",
+            "gain": f"准备计算 {config.comparison_station_name} 的覆盖增益...",
+            "document": "准备运行文档全部方案...",
+        }
+        self.set_status(status[run_mode])
+        self.run_requested.emit(config, run_mode)
 
     def _load_station_preset(self) -> None:
         self._fill_station_table(
@@ -403,7 +467,7 @@ class GlobalCoveragePage(QWidget):
             station.name,
             f"{station.lat:.8g}",
             f"{station.lon:.8g}",
-            f"{station.alt:g}",
+            f"{station.alt * 1000.0:g}",
             f"{station.min_elevation:g}",
         )
         for column, value in enumerate(values):
@@ -417,7 +481,7 @@ class GlobalCoveragePage(QWidget):
             name=values[0].strip(),
             lat=float(values[1]),
             lon=float(values[2]),
-            alt=float(values[3]),
+            alt=float(values[3]) / 1000.0,
             min_elevation=float(values[4]),
         )
 
@@ -438,12 +502,35 @@ class GlobalCoveragePage(QWidget):
         index = combo.findData(value)
         combo.setCurrentIndex(max(index, 0))
 
+    def _replace_result_tabs(
+        self, views, renderer=None, current_index: int = 0
+    ) -> None:
+        while self.result_tabs.count():
+            widget = self.result_tabs.widget(0)
+            self.result_tabs.removeTab(0)
+            widget.deleteLater()
+        self._plot_widgets.clear()
+        for label, result in views:
+            plot_widget = PlotWidget()
+            if result is not None and renderer is not None:
+                plot_widget.show_result(result, renderer)
+            self._plot_widgets.append(plot_widget)
+            self.result_tabs.addTab(plot_widget, label)
+        self.result_tabs.setCurrentIndex(
+            min(max(current_index, 0), self.result_tabs.count() - 1)
+        )
+
 
 def _double_spin(
-    minimum: float, maximum: float, step: float, decimals: int
+    minimum: float,
+    maximum: float,
+    step: float,
+    decimals: int,
+    suffix: str = "",
 ) -> QDoubleSpinBox:
     field = QDoubleSpinBox()
     field.setRange(minimum, maximum)
     field.setSingleStep(step)
     field.setDecimals(decimals)
+    field.setSuffix(suffix)
     return field

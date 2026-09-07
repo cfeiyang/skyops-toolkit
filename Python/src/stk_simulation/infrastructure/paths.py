@@ -11,12 +11,3 @@ def application_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[3]
-
-
-def data_directory() -> Path:
-    return application_root() / "data"
-
-
-def result_directory(simulation_name: str) -> Path:
-    return application_root() / "results" / simulation_name
-

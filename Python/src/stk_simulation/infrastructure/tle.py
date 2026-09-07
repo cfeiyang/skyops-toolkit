@@ -1,7 +1,8 @@
-"""CelesTrak TLE 下载、校验和本地缓存。"""
+"""从 CelesTrak 获取参考星 TLE，并提供已解析的轨道根数。"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from time import time
 from urllib.error import URLError
@@ -9,31 +10,47 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-def refresh_tle_cache(
+@dataclass(frozen=True)
+class TLEData:
+    """一次在线更新得到的参考星数据。"""
+
+    path: Path
+    epoch: float
+    mean_motion: float
+    eccentricity: float
+    inclination: float
+    arg_perigee: float
+    raan: float
+    mean_anomaly: float
+
+
+def load_latest_tle(
     url: str,
-    cache_path: str | Path,
+    cache_dir: str | Path,
     ssc: int,
     timeout: float = 30.0,
     max_cache_age: float = 7200.0,
-) -> Path:
-    """在线更新指定 SSC 的 TLE；网络失败时使用已有的有效缓存。"""
-    path = Path(cache_path)
-    if _valid_cache(path, ssc) and time() - path.stat().st_mtime < max_cache_age:
+) -> TLEData:
+    """获取指定 SSC 的最新 TLE；网络失败时使用已有有效缓存。"""
+    path = Path(cache_dir) / f"{ssc}_LATEST.tle"
+    cached = _read_cache(path, ssc)
+    if cached is not None and time() - path.stat().st_mtime < max_cache_age:
         print(f"[TLE] 使用两小时内的最新缓存: {path}")
-        return path
+        return cached
     try:
         content = _download(url, timeout)
-        normalized = _normalized_tle(content, ssc)
+        normalized, tle = _parse_tle(content, ssc, path)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f"{path.suffix}.tmp")
         temporary.write_text(normalized, encoding="ascii", newline="\n")
         temporary.replace(path)
         print(f"[TLE] 已从 CelesTrak 更新 SSC={ssc}: {path}")
-        return path
+        return tle
     except (OSError, TimeoutError, UnicodeError, URLError, ValueError) as error:
-        if _valid_cache(path, ssc):
+        cached = _read_cache(path, ssc)
+        if cached is not None:
             print(f"[TLE] 在线更新失败，使用本地缓存: {path}；原因: {error}")
-            return path
+            return cached
         raise RuntimeError(
             f"无法从 CelesTrak 获取 SSC={ssc} 的 TLE，且没有有效缓存：{error}"
         ) from error
@@ -57,8 +74,8 @@ def _download(url: str, timeout: float) -> str:
     return payload.decode("ascii")
 
 
-def _normalized_tle(content: str, ssc: int) -> str:
-    """接受 CelesTrak 的三行 TLE，并统一保存为名称行加两行根数。"""
+def _parse_tle(content: str, ssc: int, path: Path) -> tuple[str, TLEData]:
+    """校验 CelesTrak 三行 TLE，并同时解析三星派生所需的根数。"""
     lines = [line.rstrip() for line in content.splitlines() if line.strip()]
     target = str(ssc)
     for index, line1 in enumerate(lines[:-1]):
@@ -74,15 +91,28 @@ def _normalized_tle(content: str, ssc: int) -> str:
             if index > 0 and not lines[index - 1].startswith(("1 ", "2 "))
             else f"SSC {ssc}"
         )
-        return f"{name}\n{line1}\n{line2}\n"
+        try:
+            tle = TLEData(
+                path=path,
+                epoch=float(line1[18:32]),
+                mean_motion=float(line2[52:63]) * 360.0 / 86400.0,
+                eccentricity=float(f"0.{line2[26:33].strip()}"),
+                inclination=float(line2[8:16]),
+                arg_perigee=float(line2[34:42]),
+                raan=float(line2[17:25]),
+                mean_anomaly=float(line2[43:51]),
+            )
+        except (IndexError, ValueError) as error:
+            raise ValueError(f"SSC={ssc} 的 TLE 轨道根数格式无效。") from error
+        return f"{name}\n{line1}\n{line2}\n", tle
     raise ValueError(f"响应中没有找到 SSC={ssc} 的标准两行根数。")
 
 
-def _valid_cache(path: Path, ssc: int) -> bool:
+def _read_cache(path: Path, ssc: int) -> TLEData | None:
     if not path.is_file():
-        return False
+        return None
     try:
-        _normalized_tle(path.read_text(encoding="ascii"), ssc)
+        _, tle = _parse_tle(path.read_text(encoding="ascii"), ssc, path)
     except (OSError, UnicodeError, ValueError):
-        return False
-    return True
+        return None
+    return tle

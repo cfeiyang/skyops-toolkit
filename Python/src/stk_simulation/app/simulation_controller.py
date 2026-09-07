@@ -20,8 +20,8 @@ class STKWorker(QObject):
         super().__init__()
         self._session: STKSession | None = None
 
-    @Slot(object, bool)
-    def run(self, config, document_scenarios: bool) -> None:
+    @Slot(object, str)
+    def run(self, config, run_mode: str) -> None:
         try:
             if self._session is None:
                 from stk_simulation.stk.session import STKSession
@@ -31,12 +31,15 @@ class STKWorker(QObject):
             from stk_simulation.simulations.global_coverage.service import (
                 compute_global_coverage,
                 run_document_scenarios,
+                run_station_gain,
             )
 
-            if document_scenarios:
+            if run_mode == "document":
                 result = run_document_scenarios(
                     root, config, self.status_changed.emit
                 )
+            elif run_mode == "gain":
+                result = run_station_gain(root, config, self.status_changed.emit)
             else:
                 result = compute_global_coverage(root, config)
         except Exception as error:
@@ -53,7 +56,7 @@ class STKWorker(QObject):
 
 
 class SimulationController(QObject):
-    run_requested = Signal(object, bool)
+    run_requested = Signal(object, str)
     release_requested = Signal()
     busy_changed = Signal(bool)
     completed = Signal(object)
@@ -78,11 +81,11 @@ class SimulationController(QObject):
     def is_busy(self) -> bool:
         return self._busy
 
-    def start(self, config, document_scenarios: bool = False) -> None:
+    def start(self, config, run_mode: str = "normal") -> None:
         if self._busy:
             raise RuntimeError("已有仿真任务正在运行。")
         self._set_busy(True)
-        self.run_requested.emit(config, document_scenarios)
+        self.run_requested.emit(config, run_mode)
 
     def shutdown(self) -> None:
         self.release_requested.emit()

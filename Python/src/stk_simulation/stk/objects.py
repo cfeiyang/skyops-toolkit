@@ -31,9 +31,9 @@ class STKObjects:
         name: str,
         ssc: int,
         step: float,
-        tle_file: str | Path,
+        cache_path: str | Path,
     ):
-        tle_path = Path(tle_file)
+        tle_path = Path(cache_path)
         if not tle_path.is_file():
             raise FileNotFoundError(f"TLE 文件不存在：{tle_path}")
 
