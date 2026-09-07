@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agi.stk12.stkobjects import AgEAccessConstraints
+from agi.stk12.stkobjects import AgEAccessConstraints #type:ignore
 
 from stk_simulation.stk.data import instance_name
 

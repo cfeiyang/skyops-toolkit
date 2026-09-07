@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pandas as pd
 from agi.stk12.stkobjects import (
-    AgECvBounds,
-    AgECvGridClass,
-    AgEFmCompute,
-    AgEFmDefinitionType,
-    AgESTKObjectType,
+    AgECvBounds,#type:ignore
+    AgECvGridClass,#type:ignore
+    AgEFmCompute,#type:ignore
+    AgEFmDefinitionType,#type:ignore
+    AgESTKObjectType,#type:ignore
 )
 
 from stk_simulation.stk.constraints import STKConstraints

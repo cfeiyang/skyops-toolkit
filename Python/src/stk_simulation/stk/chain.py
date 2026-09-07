@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from itertools import permutations
 from typing import Any
-from agi.stk12.stkobjects import AgESTKObjectType
+from agi.stk12.stkobjects import AgESTKObjectType #type:ignore
 
 from stk_simulation.stk.data import instance_name
 

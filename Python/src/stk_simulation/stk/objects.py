@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from agi.stk12.stkobjects import (
-    AgELeadTrailData,
-    AgESTKObjectType,
-    AgEVePropagatorType,
+    AgELeadTrailData,    # type: ignore
+    AgESTKObjectType,    # type: ignore
+    AgEVePropagatorType, # type: ignore
 )
 
 from stk_simulation.stk.data import instance_name
