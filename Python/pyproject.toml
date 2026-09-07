@@ -19,7 +19,9 @@ dependencies = [
 
 [project.scripts]
 stk-simulation = "stk_simulation.__main__:main"
-stk-simulation-cli = "stk_simulation.cli:main"
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0,<7.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
