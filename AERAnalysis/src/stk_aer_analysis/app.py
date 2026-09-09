@@ -149,6 +149,12 @@ class StationDialog(QDialog):
         self.elevation_field = _number_field(
             station.min_elevation_deg, 0.0, 90.0, 2, 1.0, " °"
         )
+        self.sun_exclusion_field = _number_field(
+            station.sun_exclusion_deg, 0.0, 180.0, 2, 1.0, " °"
+        )
+        self.sun_exclusion_field.setToolTip(
+            "地面站到卫星的视线与太阳方向之间允许的最小夹角"
+        )
 
         form = QFormLayout()
         form.addRow("地面站名称", self.name_field)
@@ -156,6 +162,7 @@ class StationDialog(QDialog):
         form.addRow("经度（东正西负）", self.longitude_field)
         form.addRow("海拔高度", self.altitude_field)
         form.addRow("最低仰角", self.elevation_field)
+        form.addRow("太阳干扰规避角", self.sun_exclusion_field)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -179,6 +186,7 @@ class StationDialog(QDialog):
             longitude_deg=self.longitude_field.value(),
             altitude_m=self.altitude_field.value(),
             min_elevation_deg=self.elevation_field.value(),
+            sun_exclusion_deg=self.sun_exclusion_field.value(),
         )
         self.accept()
 
@@ -212,11 +220,11 @@ class MainWindow(QMainWindow):
         config_splitter.setSizes([450, 730])
 
         self.access_table = _result_table(
-            ("序号", "可见开始时间 / UTC", "可见结束时间 / UTC", "时长 / s"),
+            ("序号", "可见开始时间 / LCLG", "可见结束时间 / LCLG", "时长 / s"),
             stretch_column=2,
         )
         self.aer_table = _result_table(
-            ("时段", "采样时间 / UTC", "方位角 / °", "仰角 / °", "距离 / km"),
+            ("时段", "采样时间 / LCLG", "方位角 / °", "仰角 / °", "距离 / km"),
             stretch_column=1,
         )
         self.figure = Figure(figsize=(9, 6), facecolor="white")
@@ -307,9 +315,16 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_stations(self) -> QWidget:
-        self.station_table = QTableWidget(0, 5)
+        self.station_table = QTableWidget(0, 6)
         self.station_table.setHorizontalHeaderLabels(
-            ("地面站", "纬度 / °", "经度 / °", "海拔 / m", "最低仰角 / °")
+            (
+                "地面站",
+                "纬度 / °",
+                "经度 / °",
+                "海拔 / m",
+                "最低仰角 / °",
+                "太阳规避角 / °",
+            )
         )
         self.station_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -322,7 +337,7 @@ class MainWindow(QMainWindow):
         )
         header = self.station_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 5):
+        for column in range(1, 6):
             header.setSectionResizeMode(
                 column, QHeaderView.ResizeMode.ResizeToContents
             )
@@ -361,7 +376,9 @@ class MainWindow(QMainWindow):
 
         self._write_station(
             0,
-            StationConfig("ChengDu", 30.572800, 104.066800, 500.0, 15.0),
+            StationConfig(
+                "ChengDu", 30.572800, 104.066800, 500.0, 15.0, 15.0
+            ),
         )
         return panel
 
@@ -435,7 +452,9 @@ class MainWindow(QMainWindow):
         dialog = StationDialog(
             self,
             "添加地面站",
-            StationConfig(f"GroundStation{number}", 0.0, 0.0, 0.0, 15.0),
+            StationConfig(
+                f"GroundStation{number}", 0.0, 0.0, 0.0, 15.0, 15.0
+            ),
         )
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.station:
             self._write_station(self.station_table.rowCount(), dialog.station)
@@ -468,6 +487,7 @@ class MainWindow(QMainWindow):
             f"{station.longitude_deg:.6f}",
             f"{station.altitude_m:.2f}",
             f"{station.min_elevation_deg:.2f}",
+            f"{station.sun_exclusion_deg:.2f}",
         )
         for column, value in enumerate(values):
             item = QTableWidgetItem(value)
@@ -609,7 +629,7 @@ class MainWindow(QMainWindow):
             label=f"最低仰角 {result.analysis_min_elevation_deg:g}°",
         )
         elevation_axis.set_ylabel("仰角 / °")
-        elevation_axis.set_xlabel("时间 / UTC")
+        elevation_axis.set_xlabel("时间 / LCLG")
         elevation_axis.set_ylim(0, 90)
         elevation_axis.grid(True, alpha=0.25)
 
@@ -698,13 +718,13 @@ def _date_time_field(value: QDateTime) -> QDateTimeEdit:
 
 
 def _stk_time(value: QDateTime) -> str:
-    utc = value.toUTC()
+    value = value.toUTC()
     months = (
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     )
-    date = utc.date()
-    clock = utc.time()
+    date = value.date()
+    clock = value.time()
     return (
         f"{date.day()} {months[date.month() - 1]} {date.year()} "
         f"{clock.hour():02d}:{clock.minute():02d}:{clock.second():02d}."
@@ -713,7 +733,9 @@ def _stk_time(value: QDateTime) -> str:
 
 
 def _parse_stk_time(value: str) -> datetime | None:
-    text = " ".join(str(value).replace("UTCG", "").split())
+    text = " ".join(
+        str(value).replace("LCLG", "").replace("UTCG", "").split()
+    )
     whole, separator, fraction = text.partition(".")
     if separator:
         fraction = "".join(character for character in fraction if character.isdigit())

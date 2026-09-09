@@ -72,8 +72,17 @@ class STKService:
             )
             constraint.EnableMin = True
             constraint.Min = station.min_elevation_deg
+            sun_constraint = facility.AccessConstraints.AddConstraint(
+                AgEAccessConstraints.eCstrLOSSunExclusion
+            )
+            sun_constraint.Angle = station.sun_exclusion_deg
             facilities[station.name.casefold()] = facility
-            _report(progress, f"地面站已创建：{station.name}")
+            _report(
+                progress,
+                f"地面站已创建：{station.name}，最低仰角 "
+                f"{station.min_elevation_deg:g}°，太阳干扰规避角 "
+                f"{station.sun_exclusion_deg:g}°",
+            )
 
         analysis_key = request.analysis_station_name.casefold()
         facility = facilities.get(analysis_key)
@@ -91,6 +100,7 @@ class STKService:
             f"正在计算 {station.name} 对 {request.satellite_name} 的可见性...",
         )
         intervals, samples = self._compute_aer(
+            root,
             facility,
             satellite,
             request.start_time,
@@ -112,6 +122,7 @@ class STKService:
             stop_time=request.stop_time,
             analysis_station_name=station.name,
             analysis_min_elevation_deg=station.min_elevation_deg,
+            analysis_sun_exclusion_deg=station.sun_exclusion_deg,
             access_intervals=intervals,
             aer_samples=samples,
         )
@@ -171,6 +182,7 @@ class STKService:
 
     @staticmethod
     def _compute_aer(
+        root,
         facility,
         satellite,
         start_time: str,
@@ -205,8 +217,8 @@ class STKService:
             intervals.append(
                 AccessInterval(
                     access_number=index,
-                    start_time=str(interval_start),
-                    stop_time=str(interval_stop),
+                    start_time=_to_lclg(root, interval_start),
+                    stop_time=_to_lclg(root, interval_stop),
                     duration_sec=duration,
                 )
             )
@@ -221,13 +233,14 @@ class STKService:
             azimuths = _dataset_values(aer_result, "Azimuth")
             elevations = _dataset_values(aer_result, "Elevation")
             ranges = _dataset_values(aer_result, "Range")
+            local_times = _to_lclg_array(root, times)
             row_count = min(
-                len(times), len(azimuths), len(elevations), len(ranges)
+                len(local_times), len(azimuths), len(elevations), len(ranges)
             )
             samples.extend(
                 AERSample(
                     access_number=index,
-                    time=str(times[row]),
+                    time=local_times[row],
                     azimuth_deg=_as_float(azimuths[row]),
                     elevation_deg=_as_float(elevations[row]),
                     range_km=_as_float(ranges[row]),
@@ -248,6 +261,19 @@ def _dataset_values(result: Any, name: str) -> list[Any]:
 
 def _as_float(value: Any) -> float:
     return float(value)
+
+
+def _to_lclg(root, value: Any) -> str:
+    return str(root.ConversionUtility.ConvertDate("UTCG", "LCLG", str(value)))
+
+
+def _to_lclg_array(root, values: list[Any]) -> list[str]:
+    if not values:
+        return []
+    converted = root.ConversionUtility.ConvertDateArray(
+        "UTCG", "LCLG", [str(value) for value in values]
+    )
+    return [str(value) for value in converted]
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:

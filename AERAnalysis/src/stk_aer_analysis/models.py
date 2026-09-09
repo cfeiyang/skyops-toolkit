@@ -12,6 +12,7 @@ class StationConfig:
     longitude_deg: float
     altitude_m: float
     min_elevation_deg: float
+    sun_exclusion_deg: float
 
 
 @dataclass(frozen=True)
@@ -56,5 +57,6 @@ class ScenarioResult:
     stop_time: str
     analysis_station_name: str
     analysis_min_elevation_deg: float
+    analysis_sun_exclusion_deg: float
     access_intervals: tuple[AccessInterval, ...]
     aer_samples: tuple[AERSample, ...]
