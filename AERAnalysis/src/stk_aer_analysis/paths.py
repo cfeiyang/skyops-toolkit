@@ -11,3 +11,11 @@ def application_root() -> Path:
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
+
+def package_resource(*parts: str) -> Path:
+    """Return a bundled resource path in source and PyInstaller modes."""
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS) / "stk_aer_analysis"
+    else:
+        base = Path(__file__).resolve().parent
+    return base.joinpath(*parts)

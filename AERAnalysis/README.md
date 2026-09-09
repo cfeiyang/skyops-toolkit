@@ -1,6 +1,8 @@
 # STK 可见性与 AER 分析
 
-本项目使用 Python 3.10、STK Desktop 12.6 和官方 `agi.stk12` API。当前阶段可以自动获取 01A 最新 TLE，并在新建或正在运行的 STK 中创建场景、卫星和地面站。
+本项目使用 Python 3.10、STK Desktop 12.6 和官方 `agi.stk12` API。程序自动获取 01A 最新 TLE，在 STK 中创建场景、卫星和地面站，并计算指定地面站对卫星的可见时段、方位角、仰角和距离。
+
+界面默认提供成都城市参考坐标 `30.572800°N, 104.066800°E, 500 m`，实际使用时可在地面站编辑窗口中替换为设备的精确坐标和海拔。界面时间按电脑本地时间输入，传给 STK 并显示的结果时间为 UTC。
 
 ## 本地运行
 
@@ -18,3 +20,19 @@ stk-aer-analysis
 ```powershell
 python -m stk_aer_analysis
 ```
+
+## 打包 EXE
+
+首次打包先安装打包依赖：
+
+```powershell
+python -m pip install -e ".[build]"
+```
+
+执行打包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\build.ps1
+```
+
+生成文件位于 `dist\AERAnalysis.exe`。程序窗口和 EXE 均使用 AER 专用图标；运行电脑仍需安装并授权 STK Desktop 12.6。

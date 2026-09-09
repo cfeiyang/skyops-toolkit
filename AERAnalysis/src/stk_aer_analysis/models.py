@@ -1,4 +1,4 @@
-"""界面与 STK 服务之间传递的数据。"""
+"""界面与 STK 服务之间传递的数据模型。"""
 
 from __future__ import annotations
 
@@ -25,6 +25,25 @@ class ScenarioRequest:
     propagation_step_sec: float
     tle_url: str
     stations: tuple[StationConfig, ...]
+    analysis_station_name: str
+    aer_step_sec: float
+
+
+@dataclass(frozen=True)
+class AccessInterval:
+    access_number: int
+    start_time: str
+    stop_time: str
+    duration_sec: float
+
+
+@dataclass(frozen=True)
+class AERSample:
+    access_number: int
+    time: str
+    azimuth_deg: float
+    elevation_deg: float
+    range_km: float
 
 
 @dataclass(frozen=True)
@@ -35,4 +54,7 @@ class ScenarioResult:
     station_count: int
     start_time: str
     stop_time: str
-
+    analysis_station_name: str
+    analysis_min_elevation_deg: float
+    access_intervals: tuple[AccessInterval, ...]
+    aer_samples: tuple[AERSample, ...]
