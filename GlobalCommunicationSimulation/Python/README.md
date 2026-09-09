@@ -9,7 +9,7 @@ Windows 桌面程序，运行环境为 Python 3.10、STK Desktop 12.6 和 STK 12
 ```powershell
 conda create -n stk python=3.10 -y
 conda activate stk
-cd D:\Projects\STKSimulation\Python
+cd D:\Projects\STKSimulation\GlobalCommunicationSimulation\Python
 python -m pip install "C:\Program Files\AGI\STK 12\bin\AgPythonAPI\agi.stk12-12.6.0-py3-none-any.whl"
 python -m pip install -e .
 stk-simulation
@@ -29,7 +29,7 @@ python -m pip install -e .
 stk-simulation
 ```
 
-PyCharm 直接打开 `STKSimulation/Python` 目录，并选择 `stk` 环境中的 `python.exe`。程序首次运行需要联网获取 CelesTrak TLE；缓存写入 `data/`，结果写入 `results/`。
+PyCharm 直接打开 `STKSimulation/GlobalCommunicationSimulation/Python` 目录，并选择 `stk` 环境中的 `python.exe`。程序首次运行需要联网获取 CelesTrak TLE；缓存写入 `data/`，结果写入 `results/`。
 
 ## 打包 EXE
 

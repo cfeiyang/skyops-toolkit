@@ -1,10 +1,11 @@
-# STK 全球覆盖通信时长仿真工程
+# STK 仿真工具
 
-基于 MATLAB/Python 与 STK 12.6 Object Model 的全球通信覆盖时长仿真工程。
+本仓库统一维护两个相互独立的 STK 12.6 仿真项目：
 
-- `MATLAB/`：已验证 MATLAB 参考实现；
-- `Python/`：当前维护和发布的 Python 3.10 桌面程序。
+- `GlobalCommunicationSimulation/`：全球通信覆盖时长仿真，包含已验证的 MATLAB 参考实现和 Python 桌面程序。
+- `AERAnalysis/`：卫星与地面站可见性和 AER 分析桌面程序。
 
-Python 版本支持 CelesTrak 在线 TLE、按电脑日期自动设置 24 小时场景、三星几何星间中继、五个文档站址、带单位的站址参数、可调最低仰角、可选太阳干扰规避、1 小时时长梯度，以及按需计算任意新增站的覆盖时长增益。
+两个项目分别安装、运行和打包，互不依赖：
 
-安装、运行、代码结构和 EXE 打包说明见 [`Python/README.md`](Python/README.md) 与 [`Python/docs/PROJECT_GUIDE.md`](Python/docs/PROJECT_GUIDE.md)。
+- [全球通信仿真运行说明](GlobalCommunicationSimulation/Python/README.md)
+- [AER 分析运行说明](AERAnalysis/README.md)

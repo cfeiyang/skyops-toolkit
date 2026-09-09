@@ -1,39 +1,31 @@
-# ============================================================
-# STKSimulation 工程 .gitignore
-# ============================================================
-
-# ---- MATLAB 自动生成 / 临时文件 ----
-*.asv              # MATLAB 编辑器自动保存
-*.m~               # 旧式备份
+# MATLAB 自动生成文件
+*.asv
+*.m~
 *.bak
-*.mexw64           # Windows 64 位 mex 二进制
+*.mexw64
 *.mlappinstall
 *.mlpkginstall
 *.fig
 *.slxc
 .slprj/
 
-# ---- 输入数据：TLE 等（不上传）----
-MATLAB/data/
+# 仿真输入缓存与结果
+data/
+results/
 *.tle
 
-MATLAB/results/
-Python/data/
-Python/results/
-*.csv
-*.png
-*.mat
-
-# ---- Python 缓存 ----
+# Python 缓存与构建产物
 __pycache__/
 .mypy_cache/
+.pytest_cache/
 *.py[cod]
-Python/build/
-Python/dist/
-Python/*.egg-info/
-Python/src/*.egg-info/
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
 
-# ---- 系统 / 编辑器 ----
+# 编辑器与系统文件
 .idea/
 Thumbs.db
 Desktop.ini
