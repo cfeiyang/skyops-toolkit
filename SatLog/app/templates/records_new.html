@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}新增试验记录{% endblock %}
+{% block page_title %}新增试验记录{% endblock %}
+{% block page_sub %}分段录入 · 草稿自动保留 · 保存到 {{ options.Excel文件名 }}{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="alert alert--error">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert--success">{{ success }}</div>
+{% endif %}
+
+<form method="post" action="/records/new" id="record-form">
+  <div class="card">
+    <div class="tabs">
+      <button type="button" class="tab active" data-tab="tab1" onclick="switchTab('tab1', this)">① 时间与地点</button>
+      <button type="button" class="tab" data-tab="tab2" onclick="switchTab('tab2', this)">② 设备与人员</button>
+      <button type="button" class="tab" data-tab="tab3" onclick="switchTab('tab3', this)">③ 测试与问题</button>
+      <div class="spacer"></div>
+      <button class="btn btn--primary" type="submit">保存到 Excel</button>
+    </div>
+
+    {# ---------- Tab 1：时间与地点 ---------- #}
+    <div class="tab-panel active" id="tab1">
+      <div class="grid grid--2">
+        <div class="field">
+          <label class="field__label">测试日期</label>
+          <input type="date" name="test_date" value="{{ draft.test_date }}" required>
+        </div>
+        <div class="field">
+          <label class="field__label">试验名称（选填）</label>
+          <input type="text" name="experiment_name" value="{{ draft.experiment_name }}" placeholder="例如：UHP200 点对点通信">
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field__label">地点模板</label>
+        <select name="location_template" onchange="toggleLocation()">
+          {% for loc in options.测试地点 %}
+          <option value="{{ loc }}" {% if loc == draft.location_template %}selected{% endif %}>{{ loc }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div id="location-pair" class="grid grid--3">
+        <div class="field">
+          <label class="field__label">左端地点 / 主站</label>
+          <input type="text" name="location_left" value="{{ draft.location_left }}" placeholder="例如：上海">
+        </div>
+        <div class="field" style="align-self:center;text-align:center;font-size:1.4rem;color:#8394ae">{{ options.地点连接符 }}</div>
+        <div class="field">
+          <label class="field__label">右端地点 / 船舶</label>
+          <input type="text" name="location_right" value="{{ draft.location_right }}" placeholder="例如：振华35（长江出海口）">
+        </div>
+      </div>
+
+      <div id="location-single" class="field" style="display:none">
+        <label class="field__label">自测站点</label>
+        <input type="text" name="location_single" value="{{ draft.location_single }}" placeholder="例如：临港海事站">
+      </div>
+
+      <div class="grid grid--3">
+        <div class="field">
+          <label class="field__label">开始时间</label>
+          <input type="time" name="start_time" value="{{ draft.start_time }}" step="60">
+        </div>
+        <div class="field">
+          <label class="field__label">结束时间</label>
+          <input type="time" name="end_time" value="{{ draft.end_time }}" step="60">
+        </div>
+        <div class="field">
+          <label class="field__label">中断（分钟）</label>
+          <input type="number" name="interruption" value="{{ draft.interruption }}" min="0" step="1">
+        </div>
+      </div>
+      <p class="dim" style="font-size:.76rem">跨午夜测试按次日计算；起止相同按 0 分钟处理。</p>
+    </div>
+
+    {# ---------- Tab 2：设备与人员 ---------- #}
+    <div class="tab-panel" id="tab2">
+      <div class="grid grid--2">
+        <div class="field">
+          <label class="field__label">主站</label>
+          <select name="main_station">
+            {% for s in options.主站 %}<option value="{{ s }}" {% if s == draft.main_station %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">小站 / 天线</label>
+          <select name="antenna">
+            {% for s in options["小站/天线"] %}<option value="{{ s }}" {% if s == draft.antenna %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="grid grid--2">
+        <div class="field">
+          <label class="field__label">基带</label>
+          <select name="baseband">
+            {% for s in options.基带 %}<option value="{{ s }}" {% if s == draft.baseband %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">频点模板</label>
+          <select name="frequency_template" onchange="applyFreqTemplate()">
+            {% for key in options.频点模板.keys() %}
+            <option value="{{ key }}" {% if key == draft.frequency_template %}selected{% endif %}>{{ key }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label">频点设置（可微调）</label>
+        <textarea name="frequency_text" rows="3">{{ draft.frequency_text }}</textarea>
+      </div>
+      <div class="grid grid--2">
+        <div class="field">
+          <label class="field__label">运控人员</label>
+          <select name="controller">
+            {% for s in options.运控人员 %}<option value="{{ s }}" {% if s == draft.controller %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label">试验人员（可多选）</label>
+          <div class="grid grid--2" style="gap:6px">
+            {% for s in options.试验人员 %}
+            <label class="flex" style="gap:6px;cursor:pointer">
+              <input type="checkbox" name="participants" value="{{ s }}" {% if s in draft.participants %}checked{% endif %}> {{ s }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label">参数配置（转发器，选填）</label>
+        <textarea name="parameters" rows="2" placeholder="输入/输出电平、带宽、调制编码">{{ draft.parameters }}</textarea>
+      </div>
+    </div>
+
+    {# ---------- Tab 3：测试与问题 ---------- #}
+    <div class="tab-panel" id="tab3">
+      <div class="field">
+        <label class="field__label">测试情况（必填）</label>
+        <textarea name="test_description" rows="4" placeholder="测速、Iperf3 灌包、4K 视频及业务体验……">{{ draft.test_description }}</textarea>
+      </div>
+      <div class="field">
+        <label class="field__label">常见故障分类标签</label>
+        <div class="flex" style="gap:14px;flex-wrap:wrap">
+          {% for tag in options.问题分类标签 %}
+          <label class="flex" style="gap:6px;cursor:pointer">
+            <input type="checkbox" name="problem_tags" value="{{ tag }}" {% if tag in draft.problem_tags %}checked{% endif %}> {{ tag }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label">自定义标签（选填，逗号分隔）</label>
+        <input type="text" name="custom_tags" placeholder="例如：星上干扰，天线未锁定">
+      </div>
+      <div class="field">
+        <label class="field__label">问题详细描述（选填）</label>
+        <textarea name="problem_description" rows="3" placeholder="现象、发生时间、排查过程与处理结果">{{ draft.problem_description }}</textarea>
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FREQ = {{ options.频点模板 | tojson }};
+const CUSTOM_LOC = {{ options.自定义地点选项 | tojson }};
+const ARROW = {{ options.地点连接符 | tojson }};
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(name).classList.add('active');
+}
+function toggleLocation() {
+  const v = document.querySelector('select[name="location_template"]').value;
+  const isPair = v === CUSTOM_LOC || v.includes(ARROW);
+  document.getElementById('location-pair').style.display = isPair ? 'grid' : 'none';
+  document.getElementById('location-single').style.display = isPair ? 'none' : 'block';
+}
+function applyFreqTemplate() {
+  const key = document.querySelector('select[name="frequency_template"]').value;
+  document.querySelector('textarea[name="frequency_text"]').value = FREQ[key] || '';
+}
+toggleLocation();
+</script>
+{% endblock %}

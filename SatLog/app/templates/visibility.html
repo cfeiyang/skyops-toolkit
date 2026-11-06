@@ -1,0 +1,821 @@
+{% extends "base.html" %}
+{% block title %}建链可见性{% endblock %}
+{% block page_title %}建链可见性{% endblock %}
+
+{% block topbar_actions %}
+{% if tle.ok %}
+<span class="chip chip--green"><span class="dot"></span>TLE 就绪</span>
+{% else %}
+<span class="chip chip--red"><span class="dot"></span>TLE 不可用</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+{# ---------- 卫星 TLE 卡 ---------- #}
+<div class="card">
+  <div class="card__head">
+    <h2 class="card__title">卫星 TLE</h2>
+    <span class="spacer"></span>
+    {% if tle.ok %}
+    <span class="chip">🛰 {{ options.卫星.简称 }}</span>
+    <span class="chip chip--muted">{{ tle.name }}</span>
+    <span class="chip chip--muted">历元 {{ tle.epoch_local }}</span>
+    {% endif %}
+  </div>
+  {% if tle.ok %}
+  <div class="muted" style="font-size:.8rem">
+    数据源 {{ tle.source }} · 缓存时间 {{ tle.cache_time }} · 历元距今约 {{ '%.1f'|format(tle.age_hours) }} 小时
+  </div>
+  {% else %}
+  <div class="alert alert--warn">TLE 获取失败：{{ tle.message }}。可在此上传 TLE 文件（.tle / .txt），或检查网络后刷新页面。</div>
+  {% endif %}
+  <div class="field" style="margin-top:12px">
+    <label class="field__label">上传 TLE 文件（.tle / .txt，可选，优先于在线获取）</label>
+    <input type="file" name="tle_file" form="vis-form" accept=".tle,.txt">
+  </div>
+  {% if upload_error %}
+  <div class="alert alert--error">{{ upload_error }}</div>
+  {% endif %}
+</div>
+
+{% if error %}
+<div class="alert alert--error">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/" enctype="multipart/form-data" id="vis-form">
+  <div class="grid grid--2">
+    <div class="card">
+      <div class="card__head"><h2 class="card__title">地点 1</h2></div>
+      <div class="field">
+        <label class="field__label">名称</label>
+        <input type="text" name="p1_name" value="{{ p1_name }}" placeholder="如 振华">
+      </div>
+      <div class="field">
+        <label class="field__label">坐标格式</label>
+        <div class="flex" style="gap:18px">
+          <label class="flex" style="gap:6px;cursor:pointer"><input type="radio" name="p1_mode" value="dms" {% if p1_mode != 'decimal' %}checked{% endif %} onchange="toggleLoc('p1')"> 度分秒</label>
+          <label class="flex" style="gap:6px;cursor:pointer"><input type="radio" name="p1_mode" value="decimal" {% if p1_mode == 'decimal' %}checked{% endif %} onchange="toggleLoc('p1')"> 十进制</label>
+        </div>
+      </div>
+      <div id="p1-dms" class="grid grid--2" style="display:{% if p1_mode == 'decimal' %}none{% else %}grid{% endif %}">
+        <div class="field">
+          <label class="field__label">纬度（度/分/秒）</label>
+          <div class="grid grid--3">
+            <input type="number" name="p1_lat_deg" value="{{ p1_lat_deg }}" step="1" placeholder="度">
+            <input type="number" name="p1_lat_min" value="{{ p1_lat_min }}" step="1" placeholder="分">
+            <input type="number" name="p1_lat_sec" value="{{ p1_lat_sec }}" step="1" placeholder="秒">
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label">经度（度/分/秒）</label>
+          <div class="grid grid--3">
+            <input type="number" name="p1_lon_deg" value="{{ p1_lon_deg }}" step="1" placeholder="度">
+            <input type="number" name="p1_lon_min" value="{{ p1_lon_min }}" step="1" placeholder="分">
+            <input type="number" name="p1_lon_sec" value="{{ p1_lon_sec }}" step="1" placeholder="秒">
+          </div>
+        </div>
+      </div>
+      <div id="p1-dec" class="grid grid--2" style="display:{% if p1_mode == 'decimal' %}grid{% else %}none{% endif %}">
+        <div class="field">
+          <label class="field__label">纬度（°）</label>
+          <input type="number" name="p1_lat_dec" value="{{ p1_lat_dec }}" step="0.000001" placeholder="如 22.5450">
+        </div>
+        <div class="field">
+          <label class="field__label">经度（°）</label>
+          <input type="number" name="p1_lon_dec" value="{{ p1_lon_dec }}" step="0.000001" placeholder="如 114.0780">
+        </div>
+      </div>
+      <div class="grid grid--2">
+        <div class="field">
+          <label class="field__label">最低仰角（°）</label>
+          <input type="number" name="p1_min_el" value="{{ p1_min_el }}" step="0.5" min="0" max="90">
+        </div>
+        <div class="field">
+          <label class="field__label">GSO 隔离角 αth（°）</label>
+          <input type="number" name="p1_gso" value="{{ p1_gso }}" step="0.5" min="0" max="90">
+        </div>
+      </div>
+      <p class="dim" style="font-size:.72rem;margin:0">GSO 隔离角 = STK Geostationary Belt Exclusion；填 0 关闭</p>
+    </div>
+
+    <div class="card">
+      <div class="card__head"><h2 class="card__title">地点 2</h2></div>
+      <div class="field">
+        <label class="field__label">名称</label>
+        <input type="text" name="p2_name" value="{{ p2_name }}" placeholder="如 海事站">
+      </div>
+      <div class="field">
+        <label class="field__label">坐标格式</label>
+        <div class="flex" style="gap:18px">
+          <label class="flex" style="gap:6px;cursor:pointer"><input type="radio" name="p2_mode" value="dms" {% if p2_mode != 'decimal' %}checked{% endif %} onchange="toggleLoc('p2')"> 度分秒</label>
+          <label class="flex" style="gap:6px;cursor:pointer"><input type="radio" name="p2_mode" value="decimal" {% if p2_mode == 'decimal' %}checked{% endif %} onchange="toggleLoc('p2')"> 十进制</label>
+        </div>
+      </div>
+      <div id="p2-dms" class="grid grid--2" style="display:{% if p2_mode == 'decimal' %}none{% else %}grid{% endif %}">
+        <div class="field">
+          <label class="field__label">纬度（度/分/秒）</label>
+          <div class="grid grid--3">
+            <input type="number" name="p2_lat_deg" value="{{ p2_lat_deg }}" step="1" placeholder="度">
+            <input type="number" name="p2_lat_min" value="{{ p2_lat_min }}" step="1" placeholder="分">
+            <input type="number" name="p2_lat_sec" value="{{ p2_lat_sec }}" step="1" placeholder="秒">
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label">经度（度/分/秒）</label>
+          <div class="grid grid--3">
+            <input type="number" name="p2_lon_deg" value="{{ p2_lon_deg }}" step="1" placeholder="度">
+            <input type="number" name="p2_lon_min" value="{{ p2_lon_min }}" step="1" placeholder="分">
+            <input type="number" name="p2_lon_sec" value="{{ p2_lon_sec }}" step="1" placeholder="秒">
+          </div>
+        </div>
+      </div>
+      <div id="p2-dec" class="grid grid--2" style="display:{% if p2_mode == 'decimal' %}grid{% else %}none{% endif %}">
+        <div class="field">
+          <label class="field__label">纬度（°）</label>
+          <input type="number" name="p2_lat_dec" value="{{ p2_lat_dec }}" step="0.000001" placeholder="如 30.9036">
+        </div>
+        <div class="field">
+          <label class="field__label">经度（°）</label>
+          <input type="number" name="p2_lon_dec" value="{{ p2_lon_dec }}" step="0.000001" placeholder="如 121.9194">
+        </div>
+      </div>
+      <div class="grid grid--2">
+        <div class="field">
+          <label class="field__label">最低仰角（°）</label>
+          <input type="number" name="p2_min_el" value="{{ p2_min_el }}" step="0.5" min="0" max="90">
+        </div>
+        <div class="field">
+          <label class="field__label">GSO 隔离角 αth（°）</label>
+          <input type="number" name="p2_gso" value="{{ p2_gso }}" step="0.5" min="0" max="90">
+        </div>
+      </div>
+      <p class="dim" style="font-size:.72rem;margin:0">GSO 隔离角 = STK Geostationary Belt Exclusion；填 0 关闭</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="grid grid--3">
+      <div class="field">
+        <label class="field__label">开始日期</label>
+        <input type="date" name="start_date" value="{{ today }}">
+      </div>
+      <div class="field">
+        <label class="field__label">计算天数</label>
+        <input type="number" name="days" value="{{ days }}" step="1" min="1" max="8">
+      </div>
+      <div class="field">
+        <label class="field__label">&nbsp;</label>
+        <button class="btn btn--primary" type="submit" style="width:100%">计算两地通信时长</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if result %}
+{# ---------- 指标卡 ---------- #}
+<div class="grid grid--4">
+  <div class="metric">
+    <div class="metric__label">两地通信窗口数</div>
+    <div class="metric__value accent">{{ result.comm.count }}</div>
+    <div class="metric__foot">两端同时可通信的窗口</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">累计通信时长</div>
+    <div class="metric__value green">{{ result.comm.total_hours }} h</div>
+    <div class="metric__foot">两地同时可见的总时长</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">{{ result.p1.label }} 可用时长</div>
+    <div class="metric__value">{{ result.p1.total_hours }} h</div>
+    <div class="metric__foot">{{ result.p1.count }} 个窗口</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">{{ result.p2.label }} 可用时长</div>
+    <div class="metric__value">{{ result.p2.total_hours }} h</div>
+    <div class="metric__foot">{{ result.p2.count }} 个窗口</div>
+  </div>
+</div>
+
+{# ---------- 两地通信窗口表 ---------- #}
+<div class="card">
+  <div class="card__head">
+    <h2 class="card__title">两地通信窗口（Access）</h2>
+    <span class="card__hint">共 {{ result.comm.count }} 个 · 累计 {{ result.comm.total_hours }} 小时</span>
+  </div>
+  {% if result.comm.windows %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>序号</th><th>开始（北京时间）</th><th>结束（北京时间）</th><th>时长</th><th>最高仰角</th><th>峰值时刻</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        {% for w in result.comm.windows %}
+        <tr>
+          <td class="num">{{ w.number }}</td>
+          <td class="num">{{ w.start }}</td>
+          <td class="num">{{ w.stop }}</td>
+          <td class="num">{{ w.duration }}</td>
+          <td class="num">{{ w.max_el }}°</td>
+          <td class="num">{{ w.peak }}</td>
+          <td class="muted">{{ w.clipped }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert--info">该时段内两地没有同时可通信的窗口。</div>
+  {% endif %}
+</div>
+
+{# ---------- 两地各自可用窗口 ---------- #}
+<div class="grid grid--2">
+  <div class="card">
+    <div class="card__head">
+      <h2 class="card__title">{{ result.p1.label }} 可用窗口</h2>
+      <span class="card__hint">{{ result.p1.count }} 个 · {{ result.p1.total_hours }} h</span>
+    </div>
+    {% if result.p1.windows %}
+    <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+      <table class="data">
+        <thead><tr><th>#</th><th>开始</th><th>结束</th><th>时长</th><th>最高仰角</th></tr></thead>
+        <tbody>
+          {% for w in result.p1.windows %}
+          <tr><td class="num">{{ w.number }}</td><td class="num">{{ w.start }}</td><td class="num">{{ w.stop }}</td><td class="num">{{ w.duration }}</td><td class="num">{{ w.max_el }}°</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="alert alert--info">无可用窗口。</div>{% endif %}
+  </div>
+  <div class="card">
+    <div class="card__head">
+      <h2 class="card__title">{{ result.p2.label }} 可用窗口</h2>
+      <span class="card__hint">{{ result.p2.count }} 个 · {{ result.p2.total_hours }} h</span>
+    </div>
+    {% if result.p2.windows %}
+    <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+      <table class="data">
+        <thead><tr><th>#</th><th>开始</th><th>结束</th><th>时长</th><th>最高仰角</th></tr></thead>
+        <tbody>
+          {% for w in result.p2.windows %}
+          <tr><td class="num">{{ w.number }}</td><td class="num">{{ w.start }}</td><td class="num">{{ w.stop }}</td><td class="num">{{ w.duration }}</td><td class="num">{{ w.max_el }}°</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="alert alert--info">无可用窗口。</div>{% endif %}
+  </div>
+</div>
+
+{# ---------- AER 数据下载 ---------- #}
+<div class="card">
+  <div class="card__head">
+    <h2 class="card__title">AER 数据下载（60 秒步长）</h2>
+  </div>
+  {% if result.downloads %}
+  <div class="flex" style="gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+    <div class="field" style="margin:0">
+      <label class="field__label">对象</label>
+      <select id="dlGroup" style="min-width:130px"></select>
+    </div>
+    <div class="field" style="margin:0">
+      <label class="field__label">窗口</label>
+      <select id="dlWin" style="min-width:110px"></select>
+    </div>
+    <div class="field" style="margin:0">
+      <label class="field__label">格式</label>
+      <select id="dlFmt" style="min-width:100px">
+        <option value="csv" selected>CSV</option>
+        <option value="pdf">PDF</option>
+      </select>
+    </div>
+    <a class="btn btn--sm btn--primary" id="dlBtn" download href="#">⬇ 下载</a>
+    <span class="dim" style="font-size:.78rem" id="dlInfo"></span>
+    {% if result.pdfError %}<span class="dim" style="font-size:.76rem;color:#ef4444">{{ result.pdfError }}</span>{% endif %}
+  </div>
+  <div class="table-wrap" style="max-height:360px;overflow-y:auto">
+    <table class="data">
+      <thead id="dlHead"></thead>
+      <tbody id="dlBody"></tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert--info" style="margin:0">该时段内没有满足约束的可用窗口。</div>
+  {% endif %}
+</div>
+
+{# ---------- 仰角曲线 ---------- #}
+<div class="card">
+  <div class="card__head">
+    <h2 class="card__title">仰角 - 时间曲线</h2>
+    <div class="legend">
+      <span><i class="sw" style="background:#4da3ff"></i>{{ result.p1.label }}</span>
+      <span><i class="sw" style="background:#4ade80"></i>{{ result.p2.label }}</span>
+      <span><i class="sw" style="background:rgba(251,191,36,.6)"></i>最低仰角</span>
+    </div>
+  </div>
+  <div class="chart-box" style="height:320px"><canvas id="elevChart"></canvas></div>
+</div>
+
+{# ---------- 星下点轨迹（2D 平面世界地图） ---------- #}
+<div class="card">
+  <div class="card__head">
+    <h2 class="card__title">星下点轨迹（世界地图）</h2>
+    <div class="legend">
+      <span><i class="sw" style="background:#22d3ee"></i>地面轨迹</span>
+      <span><i class="sw" style="background:#ffb703"></i>卫星</span>
+      <span><i class="sw" style="background:#4da3ff"></i>{{ result.p1.label }}</span>
+      <span><i class="sw" style="background:#f472b6"></i>{{ result.p2.label }}</span>
+      <span><i class="sw" style="background:#4ade80"></i>通信中</span>
+    </div>
+    <span class="spacer"></span>
+    <span class="card__hint" id="satUpdated">—</span>
+  </div>
+
+  <div class="flex" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <button type="button" class="btn btn--sm btn--primary" id="btnPlay">▶ 动画播放</button>
+    <button type="button" class="btn btn--sm" id="btnReset">⟲ 重置</button>
+    <button type="button" class="btn btn--sm" id="btnRealtime">● 实时位置</button>
+    <span class="flex" style="gap:6px">
+      <span class="dim" style="font-size:.78rem">动画速度</span>
+      <select id="speedSel" style="width:auto;padding:6px 28px 6px 10px;font-size:.82rem">
+        <option value="60">60×</option>
+        <option value="300">300×</option>
+        <option value="600" selected>600×</option>
+        <option value="1200">1200×</option>
+        <option value="3600">3600×</option>
+      </select>
+    </span>
+    <span class="spacer"></span>
+    <span class="dim" style="font-size:.78rem" id="trackStat"></span>
+    <span class="dim" style="font-size:.78rem" id="playInfo"></span>
+  </div>
+
+  <div id="worldMap" style="width:100%;height:480px"></div>
+
+  <div style="margin-top:14px">
+    <div id="accessBars" style="position:relative;height:10px;border-radius:6px;overflow:hidden;background:rgba(148,163,184,0.08)"></div>
+    <input type="range" id="timeSlider" min="0" max="1" step="1" value="0"
+           style="width:100%;margin:6px 0 0;accent-color:#4da3ff;cursor:pointer">
+    <div class="flex" style="justify-content:space-between;font-size:.72rem;color:#8394ae">
+      <span id="tlStart">—</span>
+      <span id="tlNow">—</span>
+      <span id="tlEnd">—</span>
+    </div>
+    <div class="flex" style="gap:14px;font-size:.72rem;color:#8394ae;margin-top:8px;flex-wrap:wrap">
+      <span><i class="sw" style="background:#34d399"></i>两地通信</span>
+      <span><i class="sw" style="background:#f59e0b"></i>仅单端可见</span>
+      <span><i class="sw" style="background:#64748b"></i>都不可见</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleLoc(prefix) {
+  const mode = document.querySelector('input[name="' + prefix + '_mode"]:checked').value;
+  document.getElementById(prefix + '-dms').style.display = mode === 'dms' ? 'grid' : 'none';
+  document.getElementById(prefix + '-dec').style.display = mode === 'decimal' ? 'grid' : 'none';
+}
+
+{% if result %}
+const elevData = {{ result.elev_chart | tojson }};
+const trackData = {{ result.track | tojson }};
+const stations = {{ result.stations | tojson }};
+const downloads = {{ result.downloads | tojson }};
+
+// ---- AER 下载：对象（地点1/地点2/两地通信）+ 窗口 + 格式 ----
+(function bindDownload() {
+  const groupSel = document.getElementById('dlGroup');
+  const winSel = document.getElementById('dlWin');
+  const fmtSel = document.getElementById('dlFmt');
+  const btn = document.getElementById('dlBtn');
+  const head = document.getElementById('dlHead');
+  const body = document.getElementById('dlBody');
+  const info = document.getElementById('dlInfo');
+  if (!groupSel || !winSel || !fmtSel || !btn || !head || !body) return;
+
+  const groups = [...new Set(downloads.map(d => d.group))];
+  const winOptions = g => downloads.filter(d => d.group === g);
+  const currentEntry = () => downloads.find(d => d.group === groupSel.value && d.win === winSel.value);
+
+  function render() {
+    winSel.innerHTML = winOptions(groupSel.value).map(d => '<option value="' + d.win + '">' + d.win + '</option>').join('');
+    if (winSel.selectedIndex < 0) winSel.selectedIndex = 0;
+    apply();
+  }
+  function apply() {
+    const d = currentEntry();
+    if (!d) return;
+    let cols, rowHtml;
+    if (d.kind === 'comm') {
+      cols = ['时间（北京时间）', stations.p1.label + '方位角(°)', stations.p1.label + '仰角(°)', stations.p1.label + '距离(km)', stations.p2.label + '方位角(°)', stations.p2.label + '仰角(°)', stations.p2.label + '距离(km)'];
+      rowHtml = r => '<tr><td class="num">' + r.time + '</td><td class="num">' + r.a_az + '</td><td class="num">' + r.a_el + '</td><td class="num">' + r.a_range + '</td><td class="num">' + r.b_az + '</td><td class="num">' + r.b_el + '</td><td class="num">' + r.b_range + '</td></tr>';
+    } else {
+      cols = ['时间（北京时间）', '方位角(°)', '仰角(°)', '距离(km)'];
+      rowHtml = r => '<tr><td class="num">' + r.time + '</td><td class="num">' + r.az + '</td><td class="num">' + r.el + '</td><td class="num">' + r.range + '</td></tr>';
+    }
+    head.innerHTML = '<tr>' + cols.map(c => '<th>' + c + '</th>').join('') + '</tr>';
+    body.innerHTML = d.rows.slice(0, 500).map(rowHtml).join('');
+    const fmt = fmtSel.value;
+    const token = (fmt === 'pdf' && d.pdf) ? d.pdf : d.csv;
+    btn.href = '/download/' + token;
+    btn.textContent = '⬇ ' + d.group + ' · ' + d.win + '（' + fmt.toUpperCase() + '）';
+    if (info) info.textContent = d.group + ' · ' + d.win + '：' + d.count + ' 行' + (d.count > 500 ? '（表格显示前 500 行）' : '');
+  }
+
+  groupSel.innerHTML = groups.map(g => '<option value="' + g + '">' + g + '</option>').join('');
+  groupSel.addEventListener('change', render);
+  winSel.addEventListener('change', apply);
+  fmtSel.addEventListener('change', apply);
+  render();
+})();
+
+// 仰角-时间曲线（两地双线 + 各自最低仰角虚线）
+new Chart(document.getElementById('elevChart'), {
+  type: 'line',
+  data: {
+    labels: elevData.labels,
+    datasets: [
+      { label: stations.p1.label, data: elevData.values1, borderColor: '#4da3ff', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.15 },
+      { label: stations.p2.label, data: elevData.values2, borderColor: '#4ade80', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.15 },
+      { label: '最低仰角1', data: elevData.labels.map(() => elevData.threshold1), borderColor: 'rgba(77,163,255,0.5)', borderDash: [6, 4], borderWidth: 1, pointRadius: 0, fill: false },
+      { label: '最低仰角2', data: elevData.labels.map(() => elevData.threshold2), borderColor: 'rgba(74,222,128,0.5)', borderDash: [6, 4], borderWidth: 1, pointRadius: 0, fill: false },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#8394ae', maxTicksLimit: 12, maxRotation: 0 }, grid: { color: 'rgba(30,42,66,0.7)' } },
+      y: { title: { display: true, text: '仰角（°）', color: '#8394ae' },
+           ticks: { color: '#8394ae' }, grid: { color: 'rgba(30,42,66,0.7)' } }
+    }
+  }
+});
+
+// 星下点轨迹：2D 平面世界地图（ECharts geo）
+(function drawWorldTrack() {
+  const el = document.getElementById('worldMap');
+  if (!el) return;
+  const chart = echarts.init(el, null, { renderer: 'canvas' });
+  chart.showLoading({ text: '加载世界地图…', textColor: '#8394ae', maskColor: 'rgba(6,10,20,0.65)', color: '#4da3ff' });
+
+  // 跨 ±180° 经线时切断轨迹，避免横穿整幅地图
+  // 注意：单点段要丢弃——lines 系列 polyline:false 需要 2 个点，否则 ECharts 会抛
+  //「Cannot read properties of undefined (reading '0')」
+  function splitByDateline(points) {
+    const segments = [];
+    let current = [];
+    points.forEach(p => {
+      if (current.length) {
+        const prev = current[current.length - 1];
+        if (Math.abs(p.lon - prev[0]) > 180) {
+          if (current.length >= 2) segments.push(current);
+          current = [];
+        }
+      }
+      current.push([p.lon, p.lat]);
+    });
+    if (current.length >= 2) segments.push(current);
+    return segments;
+  }
+
+  fetch('/static/data/world.json')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(geoJson => {
+      echarts.registerMap('world', geoJson);
+      const pts = trackData.map(p => [p.lon, p.lat]);
+      const segs = splitByDateline(trackData).map(coords => ({ coords }));
+      chart.hideLoading();
+
+      // ---- 地图交互状态 ----
+      const STEP_SEC = 120;                       // 与后端轨迹采样步长一致
+      const p1 = stations.p1, p2 = stations.p2;
+      const gs1Data = [{ value: [p1.lon, p1.lat], name: p1.label }];
+      const gs2Data = [{ value: [p2.lon, p2.lat], name: p2.label }];
+      let mode = 'realtime';                      // 'realtime' | 'playback'
+      let playing = false;
+      let idx = 0;                                // 动画索引（浮点）
+      let speed = 600;                            // 动画倍速
+      let lastTick = 0;
+      let rafTimer = null;
+      let pollTimer = null;
+
+      const satLabel = document.getElementById('satUpdated');
+      const playInfo = document.getElementById('playInfo');
+      const btnPlay = document.getElementById('btnPlay');
+      const btnReset = document.getElementById('btnReset');
+      const btnRealtime = document.getElementById('btnRealtime');
+      const speedSel = document.getElementById('speedSel');
+      const timeSlider = document.getElementById('timeSlider');
+      const accessBars = document.getElementById('accessBars');
+      const tlStart = document.getElementById('tlStart');
+      const tlNow = document.getElementById('tlNow');
+      const tlEnd = document.getElementById('tlEnd');
+
+      // 每个系列都带 id：静态图层只在初始化下发，动态图层每帧按 id 增量更新
+      function allSeries() {
+        return [
+          {
+            id: 'track',
+            name: '星下点轨迹',
+            type: 'lines',
+            coordinateSystem: 'geo',
+            polyline: false,
+            silent: true,
+            data: segs,
+            lineStyle: { color: '#22d3ee', width: 1.8, opacity: 0.9 },
+          },
+          {
+            id: 'pts',
+            name: '轨迹点',
+            type: 'scatter',
+            coordinateSystem: 'geo',
+            symbolSize: 3,
+            itemStyle: { color: 'rgba(34,211,238,0.4)' },
+            data: pts,
+          },
+          {
+            id: 'link1',
+            name: p1.label + '建链',
+            type: 'lines',
+            coordinateSystem: 'geo',
+            polyline: false,
+            silent: true,
+            z: 8,
+            data: [],
+            lineStyle: { color: '#4da3ff', width: 2.5, opacity: 0.95, curveness: 0.2, shadowBlur: 8, shadowColor: 'rgba(77,163,255,0.85)' },
+          },
+          {
+            id: 'link2',
+            name: p2.label + '建链',
+            type: 'lines',
+            coordinateSystem: 'geo',
+            polyline: false,
+            silent: true,
+            z: 8,
+            data: [],
+            lineStyle: { color: '#f472b6', width: 2.5, opacity: 0.95, curveness: 0.2, shadowBlur: 8, shadowColor: 'rgba(244,114,182,0.85)' },
+          },
+          {
+            id: 'sat',
+            name: '卫星当前位置',
+            type: 'effectScatter',
+            coordinateSystem: 'geo',
+            symbolSize: 14,
+            z: 12,
+            itemStyle: { color: '#ffb703', shadowBlur: 12, shadowColor: 'rgba(255,183,3,0.9)' },
+            rippleEffect: { scale: 3.5, brushType: 'stroke' },
+            label: { show: true, formatter: '卫星', position: 'right', color: '#ffd166', fontSize: 11, fontWeight: 'bold' },
+            data: [],
+          },
+          {
+            id: 'gs1',
+            name: p1.label,
+            type: 'effectScatter',
+            coordinateSystem: 'geo',
+            symbolSize: 11,
+            z: 13,
+            itemStyle: { color: '#4da3ff' },
+            rippleEffect: { scale: 3, brushType: 'stroke' },
+            label: { show: true, formatter: p1.label, position: 'right', color: '#a8cfff', fontSize: 11 },
+            data: gs1Data,
+          },
+          {
+            id: 'gs2',
+            name: p2.label,
+            type: 'effectScatter',
+            coordinateSystem: 'geo',
+            symbolSize: 11,
+            z: 13,
+            itemStyle: { color: '#f472b6' },
+            rippleEffect: { scale: 3, brushType: 'stroke' },
+            label: { show: true, formatter: p2.label, position: 'right', color: '#f9a8d4', fontSize: 11 },
+            data: gs2Data,
+          },
+        ];
+      }
+
+      // 按 id 只更新动态图层（geo 坐标系只支持 lines 系列，line 系列会直接抛错）
+      function applyLinks(lon, lat, linked1, linked2, label) {
+        const seg1 = [{ coords: [[p1.lon, p1.lat], [lon, lat]] }];
+        const seg2 = [{ coords: [[p2.lon, p2.lat], [lon, lat]] }];
+        chart.setOption({
+          series: [
+            { id: 'link1', data: linked1 ? seg1 : [] },
+            { id: 'link2', data: linked2 ? seg2 : [] },
+            { id: 'sat', data: [{ value: [lon, lat], name: label }] },
+          ],
+        });
+      }
+
+      chart.setOption({
+        animation: false,        // 实时/动画刷新场景下关闭过渡动画，避免线滞后
+        backgroundColor: 'transparent',
+        tooltip: {
+          trigger: 'item',
+          backgroundColor: 'rgba(15,22,38,0.95)', borderColor: '#26364f',
+          textStyle: { color: '#dbe4f2', fontSize: 12 },
+        },
+        geo: {
+          map: 'world',
+          roam: true,
+          zoom: 1.1,
+          itemStyle: { areaColor: '#0f172a', borderColor: '#26364f', borderWidth: 0.6 },
+          emphasis: { itemStyle: { areaColor: '#182438' }, label: { show: false } },
+          select: { disabled: true },
+        },
+        series: allSeries(),
+      });
+      window.addEventListener('resize', () => chart.resize());
+
+      // 数据自检：显示轨迹点 / 通信点数量
+      const commTotal = trackData.filter(p => p.comm).length;
+      const trackStat = document.getElementById('trackStat');
+      if (trackStat) trackStat.textContent = '轨迹点 ' + trackData.length + ' · 通信点 ' + commTotal;
+
+      // ---- 实时模式：轮询两地 ----
+      function pollRealtime() {
+        if (mode !== 'realtime') return;
+        const qs = st => new URLSearchParams({ lat: st.lat, lon: st.lon, alt: 0, min_el: st.minEl, gso_avoid: st.gsoAvoid });
+        Promise.all([
+          fetch('/api/satellite/now?' + qs(p1).toString()).then(r => r.json()),
+          fetch('/api/satellite/now?' + qs(p2).toString()).then(r => r.json()),
+        ]).then(([d1, d2]) => {
+          if (!d1 || !d1.ok) throw new Error('地点1无数据');
+          const linked2 = !!(d2 && d2.ok && d2.linked);
+          const comm = !!(d1.linked && linked2);
+          applyLinks(d1.lon, d1.lat, !!d1.linked, linked2,
+            '卫星当前位置<br/>' + d1.time + '<br/>高度 ' + d1.altitude_km + ' km');
+          if (satLabel) satLabel.textContent = (comm ? '✅ 两地通信中 · ' : '— ') + d1.time;
+        }).catch(err => {
+          if (satLabel) satLabel.textContent = '实时位置不可用（' + err.message + '）';
+        });
+      }
+
+      function startRealtime() {
+        mode = 'realtime';
+        playing = false;
+        if (rafTimer) { clearInterval(rafTimer); rafTimer = null; }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        btnPlay.textContent = '▶ 动画播放';
+        btnPlay.classList.remove('btn--primary');
+        btnRealtime.classList.add('btn--primary');
+        if (playInfo) playInfo.textContent = '';
+        pollRealtime();
+        pollTimer = setInterval(pollRealtime, 10000);
+      }
+
+      // ---- 时间轴：按通信状态着色（绿=两地通信，琥珀=仅单端，灰=都不可见）----
+      const COMM_COLOR = { both: '#34d399', single: '#f59e0b', none: '#64748b' };
+      const COMM_TEXT = { both: '✅ 两地通信', single: '🟡 仅单端可见', none: '— 都不可见' };
+      function commState(pt) { return pt.comm ? 'both' : (pt.linked1 || pt.linked2 ? 'single' : 'none'); }
+      const commRuns = [];
+      (function buildCommRuns() {
+        let start = -1, cur = null;
+        for (let i = 0; i < trackData.length; i++) {
+          const r = commState(trackData[i]);
+          if (start < 0) { start = i; cur = r; continue; }
+          if (r !== cur) { commRuns.push([start, i - 1, cur]); start = i; cur = r; }
+        }
+        if (start >= 0) commRuns.push([start, trackData.length - 1, cur]);
+      })();
+
+      function renderTimelineBars() {
+        const n = trackData.length;
+        if (accessBars) {
+          accessBars.innerHTML = n > 1
+            ? commRuns.map(([s, e, r]) =>
+                '<div class="access-bar" style="left:' + (s / (n - 1) * 100)
+                + '%;width:' + ((e - s + 1) / (n - 1) * 100)
+                + '%;background:' + (COMM_COLOR[r] || '#64748b') + '"></div>'
+              ).join('')
+            : '';
+        }
+        if (timeSlider) { timeSlider.max = Math.max(0, n - 1); timeSlider.value = 0; }
+        if (tlStart) tlStart.textContent = n ? trackData[0].time : '—';
+        if (tlEnd) tlEnd.textContent = n ? trackData[n - 1].time : '—';
+        if (tlNow) tlNow.textContent = '';
+      }
+
+      // ---- 动画模式：按倍速沿轨迹推进 ----
+      function renderAt(i) {
+        const n = trackData.length;
+        if (!n) return;
+        const i0 = Math.max(0, Math.min(n - 1, Math.floor(i)));
+        const i1 = Math.min(n - 1, i0 + 1);
+        const f = i - i0;
+        const a = trackData[i0], b = trackData[i1];
+        let dlon = b.lon - a.lon;                 // 跨 ±180° 经线取最短路径
+        if (dlon > 180) dlon -= 360;
+        if (dlon < -180) dlon += 360;
+        let lon = a.lon + dlon * f;
+        if (lon > 180) lon -= 360;
+        if (lon < -180) lon += 360;
+        const lat = a.lat + (b.lat - a.lat) * f;
+        const st = commState(a);
+        const stText = COMM_TEXT[st];
+        applyLinks(lon, lat, !!a.linked1, !!a.linked2,
+          '动画<br/>' + a.time + '<br/>' + p1.label + '仰角 ' + a.el1 + '°<br/>' + p2.label + '仰角 ' + a.el2 + '°<br/>' + stText);
+        const pct = Math.round(i / Math.max(1, n - 1) * 100);
+        if (playInfo) playInfo.textContent = '动画 ' + a.time + '　' + pct + '%　' + stText;
+        if (timeSlider && document.activeElement !== timeSlider) timeSlider.value = Math.round(i);
+        if (tlNow) tlNow.textContent = a.time;
+      }
+
+      function tickPlayback() {
+        if (!playing) return;
+        const now = performance.now();
+        const dt = (now - lastTick) / 1000;
+        lastTick = now;
+        idx += (dt * speed) / STEP_SEC;
+        if (idx >= trackData.length - 1) {
+          idx = trackData.length - 1;
+          renderAt(idx);
+          pausePlayback();
+          return;
+        }
+        renderAt(idx);
+      }
+
+      function startPlayback() {
+        if (!trackData.length) return;
+        mode = 'playback';
+        playing = true;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        btnPlay.textContent = '⏸ 暂停';
+        btnPlay.classList.add('btn--primary');
+        btnRealtime.classList.remove('btn--primary');
+        lastTick = performance.now();
+        if (!rafTimer) rafTimer = setInterval(tickPlayback, 100);
+        renderAt(idx);
+      }
+
+      function pausePlayback() {
+        playing = false;
+        btnPlay.textContent = '▶ 继续动画';
+      }
+
+      // ---- 控件事件 ----
+      btnPlay.addEventListener('click', () => {
+        if (mode !== 'playback' || idx >= trackData.length - 1) { idx = 0; startPlayback(); return; }
+        if (playing) { pausePlayback(); }
+        else {
+          lastTick = performance.now();
+          playing = true;
+          btnPlay.textContent = '⏸ 暂停';
+        }
+      });
+
+      btnReset.addEventListener('click', () => {
+        pausePlayback();
+        mode = 'playback';
+        idx = 0;
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (rafTimer) { clearInterval(rafTimer); rafTimer = null; }
+        btnRealtime.classList.remove('btn--primary');
+        btnPlay.textContent = '▶ 动画播放';
+        renderAt(0);
+      });
+
+      btnRealtime.addEventListener('click', startRealtime);
+      speedSel.addEventListener('change', () => { speed = Number(speedSel.value) || 600; });
+
+      // 拖动进度条：跳到该时刻（进入动画模式并暂停，与时间轴绿条对应）
+      if (timeSlider) {
+        timeSlider.addEventListener('input', () => {
+          const n = trackData.length;
+          if (!n) return;
+          idx = Math.max(0, Math.min(n - 1, Number(timeSlider.value)));
+          if (mode !== 'playback') {
+            mode = 'playback';
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            btnRealtime.classList.remove('btn--primary');
+            btnPlay.classList.add('btn--primary');
+          }
+          playing = false;
+          if (rafTimer) { clearInterval(rafTimer); rafTimer = null; }
+          btnPlay.textContent = (idx >= n - 1) ? '▶ 动画播放' : '▶ 继续动画';
+          renderAt(idx);
+        });
+      }
+
+      renderTimelineBars();
+      startRealtime();
+    })
+    .catch(err => {
+      console.error('worldMap error:', err);
+      chart.hideLoading();
+      el.innerHTML = '<div class="alert alert--warn" style="margin:0">世界地图数据加载失败：' + err.message + '</div>';
+    });
+})();
+{% endif %}
+</script>
+{% endblock %}

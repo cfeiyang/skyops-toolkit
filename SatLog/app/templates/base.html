@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ app_name }}{% endblock %} · {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M25 25l14 14"/><rect x="24" y="24" width="16" height="16" rx="3" transform="rotate(-45 32 32)"/>
+            <path d="M18 15l9 9-9 9-9-9 9-9zM46 31l9 9-9 9-9-9 9-9z"/>
+            <path d="M38 18c4 1 7 4 8 8M40 11c7 2 12 7 14 14M26 46c-4-1-7-4-8-8M24 53c-7-2-12-7-14-14"/>
+          </g>
+          <circle cx="32" cy="32" r="3.5" fill="currentColor"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand__name">{{ app_name }}</div>
+        <div class="brand__meta">{{ company }} · {{ version }}</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav__label">任务</div>
+      <a class="nav__item {% if active == 'visibility' %}active{% endif %}" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="4"/></svg>
+        建链可见性
+        <span class="nav__dot"></span>
+      </a>
+      <a class="nav__item {% if active == 'new' %}active{% endif %}" href="/records/new">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        新增试验记录
+        <span class="nav__dot"></span>
+      </a>
+      <a class="nav__item {% if active == 'records' %}active{% endif %}" href="/records">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+        历史问题检索
+        <span class="nav__dot"></span>
+      </a>
+      <a class="nav__item {% if active == 'overview' %}active{% endif %}" href="/overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+        数据概览
+        <span class="nav__dot"></span>
+      </a>
+    </nav>
+
+    <div class="sidebar__foot">
+      {{ app_name }} · 卫星试验记录与建链可见性
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>{% block page_title %}SkyOps{% endblock %}</h1>
+        <div class="topbar__sub">{% block page_sub %}{% endblock %}</div>
+      </div>
+      <div class="spacer"></div>
+      {% block topbar_actions %}{% endblock %}
+    </div>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

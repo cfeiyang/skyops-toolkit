@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}数据概览{% endblock %}
+{% block page_title %}数据概览{% endblock %}
+{% block page_sub %}全部试验记录的整体情况{% endblock %}
+
+{% block content %}
+{% if status.error %}
+<div class="alert alert--warn">{{ status.error }}</div>
+{% endif %}
+
+<div class="grid grid--3">
+  <div class="metric">
+    <div class="metric__label">总记录数</div>
+    <div class="metric__value accent">{{ status.count }}</div>
+    <div class="metric__foot">{{ options.Excel文件名 }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">异常记录</div>
+    <div class="metric__value {% if abnormal_count > 0 %}red{% else %}green{% endif %}">{{ abnormal_count }}</div>
+    <div class="metric__foot">问题记录非空</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">最新记录日期</div>
+    <div class="metric__value">{{ status.latest_date }}</div>
+    <div class="metric__foot">最近一条业务记录</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__head"><h2 class="card__title">最近记录</h2></div>
+  {% if recent %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>序号</th><th>测试日期</th><th>测试时间</th><th>测试地点</th><th>运控人员</th><th>问题记录</th></tr></thead>
+      <tbody>
+        {% for r in recent %}
+        <tr>
+          <td class="num">{{ r.序号 }}</td>
+          <td class="num">{{ r.测试日期 }}</td>
+          <td class="num">{{ r.测试时间 }}</td>
+          <td>{{ r.测试地点 }}</td>
+          <td>{{ r.运控人员 }}</td>
+          <td class="muted" style="white-space:normal;min-width:240px">{{ r.问题记录 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert--info">当前尚无业务记录，保存第一条试验记录后这里会显示统计。</div>
+  {% endif %}
+</div>
+{% endblock %}

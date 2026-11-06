@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}历史问题检索{% endblock %}
+{% block page_title %}历史问题检索{% endblock %}
+{% block page_sub %}按地点、关键词与异常状态联合筛选{% endblock %}
+
+{% block content %}
+{% if flash %}
+<div class="alert alert--success">✓ {{ flash }}</div>
+{% endif %}
+{% if read_error %}
+<div class="alert alert--error">{{ read_error }}</div>
+{% endif %}
+
+<form method="get" action="/records">
+  <div class="card">
+    <div class="grid grid--3">
+      <div class="field">
+        <label class="field__label">测试地点</label>
+        <select name="location">
+          <option value="">全部地点</option>
+          {% for loc in locations %}
+          <option value="{{ loc }}" {% if loc == location_filter %}selected{% endif %}>{{ loc }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label">问题关键词</label>
+        <input type="search" name="keyword" value="{{ keyword }}" placeholder="星上干扰、遮挡……">
+      </div>
+      <div class="field">
+        <label class="field__label">&nbsp;</label>
+        <div class="flex" style="gap:14px;align-items:center;height:38px">
+          <label class="flex" style="gap:6px;cursor:pointer">
+            <input type="checkbox" name="abnormal" value="1" {% if abnormal %}checked{% endif %}> 仅看异常记录
+          </label>
+          <button class="btn btn--primary" type="submit">检索</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+<div class="card">
+  <div class="card__head">
+    <h2 class="card__title">记录列表</h2>
+    <span class="card__hint">共 {{ total }} 条记录 · 当前匹配 {{ matched }} 条</span>
+  </div>
+  {% if rows %}
+  <div class="table-wrap" style="max-height:560px;overflow-y:auto">
+    <table class="data">
+      <thead><tr><th>序号</th><th>测试日期</th><th>测试时间</th><th>测试地点</th><th>运控人员</th><th>问题记录</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="num">{{ r.序号 }}</td>
+          <td class="num">{{ r.测试日期 }}</td>
+          <td class="num">{{ r.测试时间 }}</td>
+          <td>{{ r.测试地点 }}</td>
+          <td>{{ r.运控人员 }}</td>
+          <td class="muted" style="white-space:normal;min-width:240px">{{ r.问题记录 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert--info">没有符合当前筛选条件的记录。{% if not read_error and total == 0 %} 保存第一条试验记录后这里会显示。{% endif %}</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+# ================= Python =================
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+
+# ================= 编辑器 / 系统 =================
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ================= MATLAB（原 STKSimulation 规则） =================
+*.asv
+*.m~
+*.bak
+*.mexw64
+*.mlappinstall
+*.mlpkginstall
+*.fig
+*.slxc
+.slprj/
+
+# ================= 仿真输出 / 缓存（原 STKSimulation 规则） =================
+results/
+*.tle
+
+# ================= 业务数据：Excel 一律不进版本库 =================
+*.xlsx
+*.xls
+*.xlsm
+
+# ================= 各项目本地数据目录 =================
+MPAM/data/
+SatLog/data/
+STKSimulation/**/data/
+
+# ================= 机密 / 日志 / 锁文件 =================
+config.json
+logs/*.log
+*.skyops.lock
