@@ -1,0 +1,32 @@
+# MATLAB 自动生成文件
+*.asv
+*.m~
+*.bak
+*.mexw64
+*.mlappinstall
+*.mlpkginstall
+*.fig
+*.slxc
+.slprj/
+
+# 仿真输入缓存与结果
+data/
+results/
+*.tle
+
+# Python 缓存与构建产物
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器与系统文件
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
