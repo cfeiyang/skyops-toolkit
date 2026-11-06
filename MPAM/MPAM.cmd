@@ -1,5 +1,6 @@
 @echo off
 cd /d "%~dp0"
-where pythonw >nul 2>nul
-if not errorlevel 1 (start "" pythonw main.py) else (start "" python main.py)
+set "PY=D:\Software\Anaconda3\envs\skyops\pythonw.exe"
+if not exist "%PY%" set "PY=pythonw"
+start "" "%PY%" main.py
 exit

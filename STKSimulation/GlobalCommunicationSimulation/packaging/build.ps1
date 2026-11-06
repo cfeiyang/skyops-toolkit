@@ -2,8 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
-# 优先使用 conda 的 stk 环境（含 PySide6/matplotlib/basemap），找不到再退回系统 python
-$py = "D:\Software\Anaconda3\envs\stk\python.exe"
+# 统一使用 conda 的 skyops 环境（含三个工具全部依赖），找不到再退回系统 python
+$py = "D:\Software\Anaconda3\envs\skyops\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 
 function Test-PythonModule([string]$name) {
