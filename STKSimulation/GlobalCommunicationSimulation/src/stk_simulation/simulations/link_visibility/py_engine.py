@@ -1,8 +1,15 @@
-"""基于 Skyfield SGP4 + 二分法的星地建链可见性纯 Python 计算引擎。"""
+"""基于 Skyfield SGP4 + 二分法的星地建链可见性纯 Python 计算引擎。
+
+输出富结果：
+- combined windows（两地同时通信）与 aer_samples；
+- 每个地面站各自的可用窗口与累计时长（station_windows / station_totals）；
+- 星下点轨迹 TrackPoint（含 el1/linked1/el2/linked2/comm），供世界地图动画。
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
@@ -102,41 +109,12 @@ class _StationHandle:
         return ok
 
 
-def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibilityResult:
-    """运行纯 Python 星地建链与 AER 计算。"""
-    tle = load_latest_tle(
-        config.satellite.tle_url,
-        config.paths.data_dir,
-        config.satellite.ssc,
-    )
-    lines = [ln.strip() for ln in tle.path.read_text(encoding="ascii").splitlines() if ln.strip()]
-    line1 = next(ln for ln in lines if ln.startswith("1 "))
-    line2 = next(ln for ln in lines if ln.startswith("2 "))
-
-    active_stations = config.stations[:2] if config.dual_station_sync else config.stations[:1]
-    loader = Loader(str(config.paths.data_dir))
-    ts = loader.timescale(builtin=True)
-    sat = EarthSatellite(line1, line2, config.satellite.name, ts)
-    handles = [_StationHandle(ts, sat, st) for st in active_stations]
-
-    start_utc = parse_stk_time(config.scenario.start_time)
-    stop_utc = parse_stk_time(config.scenario.stop_time)
-    if stop_utc <= start_utc:
-        raise ValueError("结束时间必须晚于开始时间。")
-    if (stop_utc - start_utc).total_seconds() > 8 * 86400.0:
-        raise ValueError("仿真时段超过 8 天，请缩小时间范围。")
-    span_sec = max((stop_utc - start_utc).total_seconds(), 60.0)
-    step = float(max(config.coarse_step_sec, 5.0))
-    grid = [start_utc + timedelta(seconds=i * step) for i in range(int(span_sec // step) + 1)]
-    if (stop_utc - grid[-1]).total_seconds() > 1.0:
-        grid.append(stop_utc)
-
-    t_grid = ts.from_datetimes(grid)
-    combined = np.asarray(handles[0].visible_at(t_grid), dtype=bool)
+def _extract_windows(handles, grid, ts, config: LinkVisibilityConfig):
+    """按给定站点集合（交集）提取可见窗口与 AER 采样。"""
+    combined = np.asarray(handles[0].visible_at(ts.from_datetimes(grid)), dtype=bool)
     for h in handles[1:]:
-        combined = combined & np.asarray(h.visible_at(t_grid), dtype=bool)
+        combined = combined & np.asarray(h.visible_at(ts.from_datetimes(grid)), dtype=bool)
 
-    # 提取连续可见区间并二分精化至秒级
     windows: list[AccessWindow] = []
     aer_records: list[AERRecord] = []
     i, n = 0, len(combined)
@@ -155,8 +133,7 @@ def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibili
             lo, hi = grid[i - 1], grid[i]
             while (hi - lo).total_seconds() > config.refine_step_sec:
                 mid = lo + (hi - lo) / 2
-                t_mid = ts.from_datetime(mid)
-                if all(bool(h.visible_at(t_mid)) for h in handles):
+                if all(bool(h.visible_at(ts.from_datetime(mid))) for h in handles):
                     hi = mid
                 else:
                     lo = mid
@@ -167,14 +144,12 @@ def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibili
             lo, hi = grid[j], grid[j + 1]
             while (hi - lo).total_seconds() > config.refine_step_sec:
                 mid = lo + (hi - lo) / 2
-                t_mid = ts.from_datetime(mid)
-                if all(bool(h.visible_at(t_mid)) for h in handles):
+                if all(bool(h.visible_at(ts.from_datetime(mid))) for h in handles):
                     lo = mid
                 else:
                     hi = mid
             w_stop = lo
 
-        # 采样窗口内 AER 并定位最高仰角
         dur = max((w_stop - w_start).total_seconds(), 0.0)
         s_step = float(max(config.sample_step_sec, 1.0))
         s_times = [w_start + timedelta(seconds=k * s_step) for k in range(int(dur // s_step) + 1)]
@@ -213,31 +188,105 @@ def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibili
             )
         )
         i = j + 1
+    return tuple(windows), aer_records
 
-    # 星下点轨迹采样
+
+def _read_tle_lines(config: LinkVisibilityConfig) -> tuple[str, str, str]:
+    """返回 (line1, line2, 来源说明)。本地文件优先，否则在线。"""
+    if config.tle_file:
+        path = Path(config.tle_file)
+        if not path.is_file():
+            raise ValueError(f"TLE 文件不存在：{path}")
+        lines = [ln.strip() for ln in path.read_text(encoding="ascii", errors="replace").splitlines() if ln.strip()]
+        line1 = next((ln for ln in lines if ln.startswith("1 ")), "")
+        line2 = next((ln for ln in lines if ln.startswith("2 ")), "")
+        if not line1 or not line2:
+            raise ValueError("TLE 文件中未找到两行根数（应以 '1 ' 与 '2 ' 开头）。")
+        return line1, line2, f"本地文件 {path.name}"
+
+    tle = load_latest_tle(config.satellite.tle_url, config.paths.data_dir, config.satellite.ssc)
+    lines = [ln.strip() for ln in tle.path.read_text(encoding="ascii").splitlines() if ln.strip()]
+    line1 = next(ln for ln in lines if ln.startswith("1 "))
+    line2 = next(ln for ln in lines if ln.startswith("2 "))
+    return line1, line2, f"在线 {tle.path.name}"
+
+
+def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibilityResult:
+    """运行纯 Python 星地建链与 AER 计算，输出含单站窗口与合并轨迹的富结果。"""
+    line1, line2, tle_source = _read_tle_lines(config)
+
+    stations = list(config.stations[:2])
+    if not stations:
+        raise ValueError("至少需要一个地面站。")
+
+    loader = Loader(str(config.paths.data_dir))
+    ts = loader.timescale(builtin=True)
+    sat = EarthSatellite(line1, line2, config.satellite.name, ts)
+    handles = [_StationHandle(ts, sat, st) for st in stations]
+
+    start_utc = parse_stk_time(config.scenario.start_time)
+    stop_utc = parse_stk_time(config.scenario.stop_time)
+    if stop_utc <= start_utc:
+        raise ValueError("结束时间必须晚于开始时间。")
+    if (stop_utc - start_utc).total_seconds() > 8 * 86400.0:
+        raise ValueError("仿真时段超过 8 天，请缩小时间范围。")
+    span_sec = max((stop_utc - start_utc).total_seconds(), 60.0)
+    step = float(max(config.coarse_step_sec, 5.0))
+    grid = [start_utc + timedelta(seconds=i * step) for i in range(int(span_sec // step) + 1)]
+    if (stop_utc - grid[-1]).total_seconds() > 1.0:
+        grid.append(stop_utc)
+    t_grid = ts.from_datetimes(grid)
+
+    # 两地通信窗口 + AER
+    combined_windows, aer_records = _extract_windows(handles, grid, ts, config)
+
+    # 单站窗口与累计时长 + 单站 AER 采样
+    station_windows: dict[str, tuple[AccessWindow, ...]] = {}
+    station_totals: dict[str, float] = {}
+    station_aer: dict[str, tuple[AERRecord, ...]] = {}
+    for h in handles:
+        ws, aer = _extract_windows([h], grid, ts, config)
+        station_windows[h.station.name] = ws
+        station_totals[h.station.name] = sum(w.duration_sec for w in ws)
+        station_aer[h.station.name] = tuple(aer)
+
+    # 星下点轨迹 + 单站建链状态
     sub = sat.at(t_grid).subpoint()
-    alt0, _, _ = handles[0].altaz(t_grid)
-    track = tuple(
-        TrackPoint(
-            time=_fmt_bj(dt),
-            latitude_deg=float(sub.latitude.degrees[idx]),
-            longitude_deg=float(sub.longitude.degrees[idx]),
-            elevation_deg=float(alt0.degrees[idx]),
-            linked=bool(combined[idx]),
+    vis = [np.asarray(h.visible_at(t_grid), dtype=bool) for h in handles]
+    els = [np.asarray(h.altaz(t_grid)[0].degrees) for h in handles]
+    track = []
+    for idx, dt in enumerate(grid):
+        linked1 = bool(vis[0][idx])
+        linked2 = bool(vis[1][idx]) if len(handles) > 1 else False
+        el1 = float(els[0][idx])
+        el2 = float(els[1][idx]) if len(handles) > 1 else 0.0
+        track.append(
+            TrackPoint(
+                time=_fmt_bj(dt),
+                latitude_deg=float(sub.latitude.degrees[idx]),
+                longitude_deg=float(sub.longitude.degrees[idx]),
+                elevation_deg=el1,
+                linked=bool(linked1 and linked2),
+                el1=el1,
+                linked1=linked1,
+                el2=el2,
+                linked2=linked2,
+            )
         )
-        for idx, dt in enumerate(grid)
-    )
 
     image_name = "link_visibility_python.png"
     return LinkVisibilityResult(
         engine_used="python",
         satellite_name=config.satellite.name,
-        station_names=tuple(st.name for st in active_stations),
+        station_names=tuple(st.name for st in stations),
         start_time=_fmt_bj(start_utc),
         stop_time=_fmt_bj(stop_utc),
-        windows=tuple(windows),
+        windows=combined_windows,
         aer_records=tuple(aer_records),
-        ground_track=track,
+        ground_track=tuple(track),
+        station_windows=station_windows,
+        station_totals=station_totals,
+        station_aer=station_aer,
         output=OutputResult(config.paths.result_dir, image_name, config.paths.result_dir / image_name),
         cfg=config,
     )

@@ -130,6 +130,9 @@ def compute_link_visibility_stk(root, config: LinkVisibilityConfig) -> LinkVisib
         windows=tuple(windows),
         aer_records=tuple(aer_records),
         ground_track=py_ref.ground_track,
+        station_windows=py_ref.station_windows,
+        station_totals=py_ref.station_totals,
+        station_aer=py_ref.station_aer,
         output=OutputResult(config.paths.result_dir, image_name, config.paths.result_dir / image_name),
         cfg=config,
     )

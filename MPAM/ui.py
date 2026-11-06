@@ -97,7 +97,7 @@ class App(tk.Tk):
         self._login_failures = 0
         self.current_user: Optional[str] = None
 
-        self.title("月度项目分配管理 (MPAM Pro)")
+        self.title("月度项目分配管理")
         self.geometry("1160x780")
         self.minsize(1020, 680)
         self.configure(bg=BG)
@@ -224,7 +224,6 @@ class App(tk.Tk):
         left_h = ttk.Frame(header, style="Header.TFrame")
         left_h.pack(side="left")
         ttk.Label(left_h, text="📊 月度项目分配管理工作台", style="HeaderTitle.TLabel").pack(anchor="w")
-        ttk.Label(left_h, text="Monthly Project Allocation Management · 自动判重 / 原子保存 / 备份审计", style="HeaderSub.TLabel").pack(anchor="w", pady=(2, 0))
 
         right_h = ttk.Frame(header, style="Header.TFrame")
         right_h.pack(side="right")
@@ -242,13 +241,6 @@ class App(tk.Tk):
         outer = ttk.Frame(self, padding=(18, 12, 18, 10))
         outer.pack(fill="both", expand=True)
 
-        # 顶部 3 张 KPI 指标卡
-        kpi_row = ttk.Frame(outer)
-        kpi_row.pack(fill="x", pady=(0, 12))
-        self.kpi_people_val, self.kpi_people_sub = self._create_kpi_card(kpi_row, "👥 当月已分配人员", "0 / 0 人", "覆盖率 0%")
-        self.kpi_proj_val, self.kpi_proj_sub = self._create_kpi_card(kpi_row, "🏷️ 当月分配项目总数", "0 项", "人均 0.0 项")
-        self.kpi_dup_val, self.kpi_dup_sub = self._create_kpi_card(kpi_row, "⚠️ 同月多人重合项目", "0 项", "无跨人员重复项目", warn=True)
-
         self.notebook = ttk.Notebook(outer)
         self.notebook.pack(fill="both", expand=True)
         self.assign_tab = ttk.Frame(self.notebook, padding=(10, 10))
@@ -265,16 +257,6 @@ class App(tk.Tk):
             self._load_options()
         else:
             self._enter_empty_state()
-
-    def _create_kpi_card(self, parent, title: str, init_val: str, init_sub: str, warn: bool = False):
-        card = ttk.Frame(parent, style="Card.TFrame", padding=(16, 10))
-        card.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ttk.Label(card, text=title, style="CardMuted.TLabel").pack(anchor="w")
-        val_lbl = ttk.Label(card, text=init_val, style="MetricWarn.TLabel" if warn else "MetricVal.TLabel")
-        val_lbl.pack(anchor="w", pady=(2, 2))
-        sub_lbl = ttk.Label(card, text=init_sub, style="CardMuted.TLabel")
-        sub_lbl.pack(anchor="w")
-        return val_lbl, sub_lbl
 
     def _build_assign_tab(self) -> None:
         tab = self.assign_tab
@@ -316,7 +298,7 @@ class App(tk.Tk):
         self.add_project_btn = ttk.Button(pid_row, text="＋ 项目号", width=8, command=self._add_project)
         self.add_project_btn.pack(side="left", padx=(8, 0))
 
-        ttk.Label(left_card, text="4. 手误修改 (可选原项目号替换)", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
+        ttk.Label(left_card, text="4. 项目号变更（替换原项目号）", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
         self.old_box = ttk.Combobox(left_card, textvariable=self.old_var, state="readonly", width=26, font=FONT)
         self.old_box.pack(anchor="w", pady=(0, 16))
         self.old_box.bind("<<ComboboxSelected>>", lambda _e: self._update_status())
@@ -392,12 +374,10 @@ class App(tk.Tk):
         self.search_count = ttk.Label(card, text="导入文件后，这里会显示检索结果", style="Muted.TLabel")
         self.search_count.pack(anchor="w", pady=(10, 0))
 
-        # 输入即查（防抖），不用点「查询」；下拉选择后立即查
+        # 检索改为显式触发：只有「查询」按钮或回车才执行；输入/下拉仅做本地候选筛选
         self.search_person_box.bind("<KeyRelease>", self._on_person_key)
-        self.search_person_box.bind("<<ComboboxSelected>>", lambda _e: self._schedule_search(0))
         self.search_person_box.bind("<Return>", lambda _e: self._do_search())
         self.search_project_box.bind("<KeyRelease>", self._on_project_key)
-        self.search_project_box.bind("<<ComboboxSelected>>", lambda _e: self._schedule_search(0))
         self.search_project_box.bind("<Return>", lambda _e: self._do_search())
 
         wrap = ttk.Frame(left)
@@ -590,7 +570,6 @@ class App(tk.Tk):
         self.search_count.configure(text="导入文件后，这里会显示检索结果")
         self._apply_enabled(False)
         self._set_status("请先点击右上角「导入 Excel 工作簿…」选择 Excel 文件", MUTED)
-        self._zero_kpi()
         self._update_footer()
 
     def _apply_enabled(self, enabled: bool) -> None:
@@ -617,41 +596,17 @@ class App(tk.Tk):
         else:
             self.footer_right.configure(text="尚未加载数据")
 
-    # ------------------------------------------------------------------ KPI
-    def _update_kpi(self, assigned: int, total_people: int, total_projects: int, dup_count: int) -> None:
-        coverage = (assigned * 100.0 / total_people) if total_people else 0.0
-        per_capita = (total_projects / total_people) if total_people else 0.0
-        self.kpi_people_val.configure(text=f"{assigned} / {total_people} 人")
-        self.kpi_people_sub.configure(text=f"覆盖率 {coverage:.0f}%")
-        self.kpi_proj_val.configure(text=f"{total_projects} 项")
-        self.kpi_proj_sub.configure(text=f"人均 {per_capita:.1f} 项")
-        self.kpi_dup_val.configure(text=f"{dup_count} 项")
-        self.kpi_dup_sub.configure(text="存在跨人员重复项目" if dup_count else "无跨人员重复项目")
-
-    def _zero_kpi(self) -> None:
-        if not hasattr(self, "kpi_people_val"):
-            return
-        self.kpi_people_val.configure(text="0 / 0 人")
-        self.kpi_people_sub.configure(text="覆盖率 0%")
-        self.kpi_proj_val.configure(text="0 项")
-        self.kpi_proj_sub.configure(text="人均 0.0 项")
-        self.kpi_dup_val.configure(text="0 项")
-        self.kpi_dup_sub.configure(text="无跨人员重复项目")
-
     # ------------------------------------------------------------------ 刷新
     def _refresh(self) -> None:
         if self.store is None:
-            self._zero_kpi()
             return
         key = self._current_key()
         self.tree.delete(*self.tree.get_children())
         if key is None:
             self.summary.configure(text="请选择有效的月份")
-            self._zero_kpi()
             return
         people = self.store.people()
         assigned_people = 0
-        total_projects = 0
         max_display = 0
 
         # 当月跨人员重复项目统计（与高亮同口径）
@@ -666,7 +621,6 @@ class App(tk.Tk):
             max_display = max(max_display, len(joined))
             if projects:
                 assigned_people += 1
-                total_projects += len(projects)
                 dup_hit = any(cross_counter[p] > 1 for p in projects)
                 self.tree.insert(
                     "", "end",
@@ -677,9 +631,6 @@ class App(tk.Tk):
                 self.tree.insert("", "end", values=(name, "—", "未分配", ""), tags=("todo",))
         self.tree.column("project", width=max(260, min(max_display * 13 + 24, 760)))
         self.summary.configure(text=f"{month_label(key)} 分配情况　{assigned_people}/{len(people)} 人已分配")
-
-        dup_count = sum(1 for count in cross_counter.values() if count > 1)
-        self._update_kpi(assigned_people, len(people), total_projects, dup_count)
 
         self._all_ids = self.store.all_project_ids()
         self.search_project_box["values"] = self._all_ids
@@ -888,15 +839,8 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ 检索
     def _on_tab_changed(self, _event=None) -> None:
-        """切到检索页时自动按当前条件刷新一次，不用再点「查询」。"""
-        if self.store is None or not hasattr(self, "search_tree"):
-            return
-        try:
-            current = self.notebook.index(self.notebook.select())
-        except tk.TclError:
-            return
-        if current == 1:
-            self._search_now()
+        """检索改为显式触发：切换页签不再自动查询。"""
+        return
 
     def _on_mode_changed(self) -> None:
         box = self.search_person_box if self.search_mode.get() == "person" else self.search_project_box
@@ -904,21 +848,16 @@ class App(tk.Tk):
             box.focus()
         except tk.TclError:
             pass
-        self._schedule_search(0)
 
     def _on_person_key(self, event=None) -> None:
         if event is not None and event.keysym in NAV_KEYS:
-            self._schedule_search()
             return
         self._filter_person_values()
-        self._schedule_search()
 
     def _on_project_key(self, event=None) -> None:
         if event is not None and event.keysym in NAV_KEYS:
-            self._schedule_search()
             return
         self._filter_project_values()
-        self._schedule_search()
 
     def _autocomplete(self, box, text: str, candidates: List[str]) -> None:
         """输入即联想：前缀命中的排前面、包含命中的排后面，并自动展开下拉。"""

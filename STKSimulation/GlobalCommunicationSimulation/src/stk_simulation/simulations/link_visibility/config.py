@@ -52,8 +52,12 @@ class TrackPoint:
     time: str
     latitude_deg: float
     longitude_deg: float
-    elevation_deg: float
-    linked: bool
+    elevation_deg: float = 0.0
+    linked: bool = False           # 两地同时通信（comm）
+    el1: float = 0.0
+    linked1: bool = False
+    el2: float = 0.0
+    linked2: bool = False
 
 
 @dataclass
@@ -67,6 +71,7 @@ class LinkVisibilityConfig:
     refine_step_sec: float = 1.0
     sample_step_sec: float = 30.0
     dual_station_sync: bool = False  # False=单站建链, True=两地同时可见中继建链
+    tle_file: str = ""               # 可选：本地 TLE 文件路径，优先于在线获取
 
 
 @dataclass
@@ -94,6 +99,9 @@ class LinkVisibilityResult:
     output: OutputResult
     cfg: LinkVisibilityConfig
     diff_items: tuple[EngineDiffItem, ...] = field(default_factory=tuple)
+    station_windows: dict[str, tuple[AccessWindow, ...]] = field(default_factory=dict)
+    station_totals: dict[str, float] = field(default_factory=dict)
+    station_aer: dict[str, tuple[AERRecord, ...]] = field(default_factory=dict)
 
     @property
     def total_duration_sec(self) -> float:
@@ -127,9 +135,9 @@ def default_link_visibility_config() -> LinkVisibilityConfig:
                 gso_avoid_deg=15.0,
             ),
             LinkStationConfig(
-                name="喀什站",
-                latitude_deg=39.7730,
-                longitude_deg=76.5128,
+                name="深圳飞思",
+                latitude_deg=22.545,
+                longitude_deg=114.078,
                 altitude_m=0.0,
                 min_elevation_deg=15.0,
                 gso_avoid_deg=15.0,

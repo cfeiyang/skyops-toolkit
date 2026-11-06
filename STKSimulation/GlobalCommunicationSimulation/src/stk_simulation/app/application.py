@@ -67,6 +67,24 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     min-height: 30px;
     padding: 0 7px;
 }
+QSpinBox, QDoubleSpinBox {
+    min-width: 72px;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+    width: 20px;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #cbd5e1;
+}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow,
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    width: 8px;
+    height: 8px;
+}
 QPushButton {
     background: white;
     border: 1px solid #b8c3d1;
@@ -97,7 +115,7 @@ QPushButton:checked {
 
 def run_application() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("SkyOps 航天综合仿真平台")
+    app.setApplicationName("SkyOps Toolkit")
     app_icon = QIcon(str(APP_ICON))
     app.setWindowIcon(app_icon)
     app.setStyle("Fusion")

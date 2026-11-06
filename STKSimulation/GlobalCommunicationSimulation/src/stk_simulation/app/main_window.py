@@ -27,25 +27,20 @@ from stk_simulation.simulations.link_visibility.config import default_link_visib
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("SkyOps 航天综合仿真平台 (STK 12.6 & Pure Python 双引擎)")
+        self.setWindowTitle("SkyOps")
         self.resize(1460, 920)
         self.setMinimumSize(1160, 740)
         self._run_mode = "normal"
 
-        # 顶栏：左侧标题 + 中间双业务导航 + 右侧双引擎切换
+        # 顶栏：双业务导航 + 右侧双引擎切换
         header = QFrame()
         header.setObjectName("topBar")
         header_layout = QHBoxLayout(header)
 
-        title = QLabel("🛰️ SkyOps 航天综合仿真平台")
-        title.setObjectName("appTitle")
-        header_layout.addWidget(title)
-        header_layout.addSpacing(24)
-
-        self.nav_cov_btn = QPushButton("🌐 全球通信覆盖时长仿真")
+        self.nav_cov_btn = QPushButton("🌐 全球覆盖")
         self.nav_cov_btn.setCheckable(True)
         self.nav_cov_btn.setChecked(True)
-        self.nav_link_btn = QPushButton("📡 星地建链与 AER 预报")
+        self.nav_link_btn = QPushButton("📡 建链可见性")
         self.nav_link_btn.setCheckable(True)
 
         nav_group = QButtonGroup(self)
@@ -59,8 +54,8 @@ class MainWindow(QMainWindow):
 
         header_layout.addWidget(QLabel("计算引擎:"))
         self.engine_combo = QComboBox()
-        self.engine_combo.addItem("⚡ 纯 Python 极速引擎 (免 STK)", "python")
-        self.engine_combo.addItem("🟢 STK 12.6 官方引擎 (COM)", "stk")
+        self.engine_combo.addItem("基于 Python", "python")
+        self.engine_combo.addItem("连接 STK", "stk")
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         header_layout.addWidget(self.engine_combo)
 
