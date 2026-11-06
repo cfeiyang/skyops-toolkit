@@ -1,8 +1,6 @@
-"""STK Desktop 会话和 Scenario 生命周期。"""
+"""STK Desktop 会话和 Scenario 生命周期（支持无 STK 环境安全导入）。"""
 
 from __future__ import annotations
-
-from agi.stk12.stkdesktop import STKDesktop
 
 
 class STKSession:
@@ -17,6 +15,14 @@ class STKSession:
         normalized_mode = str(mode).lower()
         if self.root is not None and normalized_mode == self.mode:
             return self.root
+
+        try:
+            from agi.stk12.stkdesktop import STKDesktop  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError(
+                "当前环境未安装 STK 12 Python API (agi.stk12)。"
+                "请切换至顶部的「⚡ 纯 Python 极速引擎」运行，或在装有 STK 12.6 的环境中运行。"
+            ) from exc
 
         if normalized_mode == "new":
             print("[STK] 正在新建 STK 12 实例...")

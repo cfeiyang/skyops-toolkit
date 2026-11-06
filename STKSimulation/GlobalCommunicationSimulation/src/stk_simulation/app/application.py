@@ -77,6 +77,12 @@ QPushButton {
 QPushButton:hover {
     background: #eef4fb;
 }
+QPushButton:checked {
+    background: #1769aa;
+    color: white;
+    border-color: #1769aa;
+    font-weight: 600;
+}
 #primaryButton {
     background: #1769aa;
     color: white;
@@ -91,7 +97,7 @@ QPushButton:hover {
 
 def run_application() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("STK 全球覆盖通信时长仿真")
+    app.setApplicationName("SkyOps 航天综合仿真平台")
     app_icon = QIcon(str(APP_ICON))
     app.setWindowIcon(app_icon)
     app.setStyle("Fusion")

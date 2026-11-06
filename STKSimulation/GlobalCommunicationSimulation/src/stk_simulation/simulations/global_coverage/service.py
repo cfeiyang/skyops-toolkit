@@ -9,24 +9,22 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 
 from stk_simulation.infrastructure.tle import TLEData, load_latest_tle
 from stk_simulation.simulations.common import OutputResult
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
-from stk_simulation.simulations.global_coverage.plot import plot_global_coverage
 from stk_simulation.simulations.global_coverage.presets import (
     derived_satellite_elements,
     station_template,
 )
-from stk_simulation.stk.chain import STKChain
-from stk_simulation.stk.constraints import STKConstraints
-from stk_simulation.stk.coverage import STKCoverage
 from stk_simulation.stk.data import instance_name, numeric_dataset
-from stk_simulation.stk.objects import STKObjects
-from stk_simulation.stk.session import STKSession
-from stk_simulation.utils.plotting import save_axes_image
+
+# 说明：
+# - STKChain / STKConstraints / STKCoverage / STKObjects / STKSession
+#   改为函数内惰性导入 —— 这些模块顶层依赖 agi.stk12，
+#   未安装 STK 的电脑走纯 Python 引擎时不应触发 ModuleNotFoundError；
+# - matplotlib 与绘图函数（plot_global_coverage / save_axes_image）同样惰性导入，
+#   使纯 Python 引擎只依赖 numpy/pandas/sgp4，无需安装 GUI 绘图栈即可跑通计算。
 
 
 @dataclass
@@ -64,8 +62,27 @@ def compute_global_coverage(
     config: GlobalCoverageConfig,
     *,
     tle: TLEData | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> GlobalCoverageResult:
-    """创建 STK 场景并提取绘图所需的全部数值，不操作 GUI。"""
+    """创建 STK 场景并提取绘图所需的全部数值，不操作 GUI。
+
+    根据 config.stk.engine 自动选择 STK 官方引擎或纯 Python 向量化引擎；
+    无 STK 环境（root 为 None）时自动回退到纯 Python 引擎。
+    """
+    if getattr(config.stk, "engine", "python") == "python" or root is None:
+        from stk_simulation.simulations.global_coverage.py_engine import (
+            compute_global_coverage_python,
+        )
+
+        return compute_global_coverage_python(config, tle=tle, progress=progress)
+
+    # 惰性导入 STK 依赖模块（仅官方引擎路径需要）
+    from stk_simulation.stk.chain import STKChain
+    from stk_simulation.stk.constraints import STKConstraints
+    from stk_simulation.stk.coverage import STKCoverage
+    from stk_simulation.stk.objects import STKObjects
+    from stk_simulation.stk.session import STKSession
+
     tle = tle or _load_reference_tle(config)
     scenario = STKSession.create_scenario(
         root,
@@ -147,6 +164,9 @@ def compute_global_coverage(
 
 def render_global_coverage(result: GlobalCoverageResult, axes=None):
     """在当前线程绘图并保存；GUI 应在 Qt 主线程调用。"""
+    from stk_simulation.simulations.global_coverage.plot import plot_global_coverage
+    from stk_simulation.utils.plotting import save_axes_image
+
     axes = plot_global_coverage(result, result.cfg, axes)
     result.output.result_dir.mkdir(parents=True, exist_ok=True)
     save_axes_image(axes, result.output.image_path)
@@ -358,6 +378,9 @@ def _file_token(value: str) -> str:
 
 
 def _render_offscreen(result: GlobalCoverageResult) -> None:
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
     figure = Figure(figsize=(14, 6.5), facecolor="white", layout="constrained")
     FigureCanvasAgg(figure)
     render_global_coverage(result, figure.add_subplot(111))
@@ -367,6 +390,8 @@ def _render_offscreen(result: GlobalCoverageResult) -> None:
 def _create_satellites(
     root, scenario, config: GlobalCoverageConfig, tle: TLEData
 ) -> list[Any]:
+    from stk_simulation.stk.objects import STKObjects
+
     reference = STKObjects.create_satellite_from_tle(
         root,
         scenario,
@@ -399,6 +424,8 @@ def _apply_interference_avoidance(
     stk_object, config: GlobalCoverageConfig
 ) -> None:
     if config.interference.enabled:
+        from stk_simulation.stk.constraints import STKConstraints
+
         STKConstraints.set_sun_exclusion(
             stk_object, config.interference.angle
         )

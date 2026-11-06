@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from stk_simulation.infrastructure.paths import application_root
@@ -24,6 +24,7 @@ class PathsConfig:
 @dataclass
 class STKConfig:
     mode: str = "new"
+    engine: str = "python"  # "python" (纯Python极速引擎) 或 "stk" (STK 12.6官方引擎)
 
 
 @dataclass
@@ -84,3 +85,14 @@ def _stk_time(value: datetime) -> str:
         f"{value.day} {months[value.month - 1]} {value.year} "
         f"{value:%H:%M:%S}.000"
     )
+
+
+def parse_stk_time(text: str) -> datetime:
+    """将 STK UTCG 时间字符串 (如 '1 Sep 2026 00:00:00.000') 或 ISO 格式解析为 UTC datetime。"""
+    cleaned = text.strip()
+    for fmt in ("%d %b %Y %H:%M:%S.%f", "%d %b %Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(cleaned, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise ValueError(f"无法识别的时间格式: {text}")

@@ -1,23 +1,36 @@
 from pathlib import Path
-
 from PyInstaller.utils.hooks import collect_all, collect_data_files
-
 
 project_root = Path(SPEC).resolve().parents[1]
 source_root = project_root / "src"
 app_icon = source_root / "stk_simulation" / "assets" / "app_icon.ico"
 
-stk_datas, stk_binaries, stk_hiddenimports = collect_all("agi.stk12")
-datas = list(stk_datas)
-datas += collect_data_files("mpl_toolkits.basemap_data")
+datas = []
+binaries = []
+hiddenimports = ["scipy.spatial.transform._rotation_groups", "skyfield", "sgp4"]
+
+try:
+    stk_datas, stk_binaries, stk_hiddenimports = collect_all("agi.stk12")
+    datas += list(stk_datas)
+    binaries += list(stk_binaries)
+    hiddenimports += list(stk_hiddenimports)
+except Exception:
+    print("[打包提示] 当前环境未检测到 agi.stk12，将仅打包纯 Python 引擎支持。")
+
+for pkg in ("mpl_toolkits.basemap_data", "skyfield", "sgp4"):
+    try:
+        datas += collect_data_files(pkg)
+    except Exception:
+        pass
+
 datas.append((str(app_icon), "stk_simulation/assets"))
 
 a = Analysis(
     [str(source_root / "stk_simulation" / "__main__.py")],
     pathex=[str(source_root)],
-    binaries=stk_binaries,
+    binaries=binaries,
     datas=datas,
-    hiddenimports=stk_hiddenimports,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -32,7 +45,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="STKSimulation",
+    name="SkyOpsSim",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

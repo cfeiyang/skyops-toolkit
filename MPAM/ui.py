@@ -1,18 +1,15 @@
-"""月度项目分配管理（MPAM）—— tkinter 界面层。
+"""月度项目分配管理（MPAM）—— 现代化企业级双栏看板界面层。
 
-启动流程：登录（默认账号 root / 密码 123456，可在 config.json 修改）
-→ 主界面（不弹文件选择框）→ 点「导入 Excel…」选择要编辑的文件 → 分配/检索。
-
-界面分两个页签：
-- 分配：选月份（月历弹窗，默认当天所在月）、选人员、新增/修改项目号；
-- 检索：按人员（姓名模糊）或按项目号（一字不差）查全部月份，
-  两个输入框都是可输入的下拉、自动加载文件里已有的值，输入即查，不用点按钮。
-
-业务规则全部在 excel_store.py 里，界面只负责收集输入与展示。
+保持与 excel_store.py 100% 兼容，升级特性：
+1. 顶部实时 KPI 统计指标卡片（已排人员、总分配项、同月重合项目预警）；
+2. 内嵌式月份前后切换器（◀ 2026年11月 ▶ + 快捷月历弹窗）；
+3. 左侧卡片式录入/修改控制台 + 右侧带胶囊视觉的分配全景列表；
+4. 检索中心支持人员/项目号秒级防抖联动与右侧历史轨迹审计时间轴。
 """
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 import tkinter as tk
 from datetime import datetime
@@ -30,45 +27,50 @@ from excel_store import (
 )
 
 FONT = ("Microsoft YaHei UI", 10)
-FONT_TITLE = ("Microsoft YaHei UI", 15, "bold")
+FONT_BOLD = ("Microsoft YaHei UI", 10, "bold")
+FONT_TITLE = ("Microsoft YaHei UI", 16, "bold")
+FONT_METRIC_VAL = ("Microsoft YaHei UI", 18, "bold")
 FONT_STATUS = ("Microsoft YaHei UI", 10, "bold")
 FONT_LOGIN = ("Microsoft YaHei UI", 11)
 
-# 专业 SaaS 配色：浅灰底 + 白色卡片 + 蓝色主色 + 深色顶栏
-BG = "#f4f5f7"
+# 企业级现代配色系统
+BG = "#f1f5f9"
 CARD = "#ffffff"
-INK = "#1f2937"
-MUTED = "#6b7280"
+CARD_BORDER = "#e2e8f0"
+INK = "#0f172a"
+MUTED = "#64748b"
 OK = "#16a34a"
 WARN = "#dc2626"
 HINT = "#d97706"
 PRIMARY = "#2563eb"
 PRIMARY_DARK = "#1d4ed8"
-HEADER_BG = "#1e293b"
+HEADER_BG = "#0f172a"
 HEADER_SUB = "#94a3b8"
-FOOTER_BG = "#e9ecf1"
+FOOTER_BG = "#e2e8f0"
 
 OLD_NONE = "不修改"
 
 ASSIGN_COLUMNS = (
-    ("person", "人员", 140),
-    ("project", "项目号", 260),
-    ("state", "状态", 110),
-    ("time", "最近分配", 190),
+    ("person", "人员姓名", 120),
+    ("project", "已分配项目号 (胶囊视图)", 320),
+    ("state", "当月状态", 110),
+    ("time", "最近操作时间", 170),
 )
 SEARCH_COLUMNS = (
-    ("month", "月份", 140),
-    ("person", "人员", 140),
-    ("project", "项目号", 200),
-    ("time", "分配时间", 190),
+    ("month", "所属月份", 130),
+    ("person", "人员姓名", 130),
+    ("project", "项目编号", 220),
+    ("time", "分配记录时间", 180),
+)
+AUDIT_COLUMNS = (
+    ("month", "月份", 110),
+    ("project", "项目号", 150),
+    ("time", "分配时间", 150),
 )
 
 CONFIG_FILE = Path(__file__).resolve().parent / "config.json"
 DEFAULT_CREDENTIALS = {"username": "root", "password": "123456"}
-
-# 检索防抖：停止输入这么多毫秒后才真正查询，打字过程不重建表格
 SEARCH_DELAY_MS = 120
-# 这些按键只是翻下拉/移动光标，跳过值过滤（避免把展开的下拉重置掉）
 NAV_KEYS = {
     "Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End",
     "Return", "KP_Enter", "Escape", "Tab",
@@ -90,14 +92,14 @@ class App(tk.Tk):
         self.login_user_var = tk.StringVar()
         self.login_pass_var = tk.StringVar()
 
-        self._search_job: Optional[str] = None  # 防抖定时器 id
-        self._all_ids: List[str] = []           # 文件里已有的项目号（下拉候选）
+        self._search_job: Optional[str] = None
+        self._all_ids: List[str] = []
         self._login_failures = 0
         self.current_user: Optional[str] = None
 
-        self.title("月度项目分配管理")
-        self.geometry("1040x740")
-        self.minsize(960, 640)
+        self.title("月度项目分配管理 (MPAM Pro)")
+        self.geometry("1160x780")
+        self.minsize(1020, 680)
         self.configure(bg=BG)
 
         self._setup_style()
@@ -116,71 +118,53 @@ class App(tk.Tk):
             pass
         style.configure(".", background=BG, foreground=INK, font=FONT)
         style.configure("TFrame", background=BG)
-        style.configure("Card.TFrame", background=CARD)
+        style.configure("Card.TFrame", background=CARD, relief="solid", borderwidth=1)
         style.configure("TLabel", background=BG, foreground=INK, font=FONT)
         style.configure("Muted.TLabel", background=BG, foreground=MUTED)
         style.configure("Card.TLabel", background=CARD, foreground=INK, font=FONT)
+        style.configure("CardBold.TLabel", background=CARD, foreground=INK, font=FONT_BOLD)
+        style.configure("CardMuted.TLabel", background=CARD, foreground=MUTED, font=("Microsoft YaHei UI", 9))
+        style.configure("MetricVal.TLabel", background=CARD, foreground=PRIMARY, font=FONT_METRIC_VAL)
+        style.configure("MetricWarn.TLabel", background=CARD, foreground=HINT, font=FONT_METRIC_VAL)
         style.configure("Card.TRadiobutton", background=CARD, foreground=INK, font=FONT)
-        style.configure("Title.TLabel", background=BG, foreground="#163a63", font=FONT_TITLE)
+        style.configure("Title.TLabel", background=BG, foreground=INK, font=FONT_TITLE)
 
-        # 顶栏 / 底栏
         style.configure("Header.TFrame", background=HEADER_BG)
-        style.configure("HeaderTitle.TLabel", background=HEADER_BG, foreground="#ffffff",
-                        font=("Microsoft YaHei UI", 15, "bold"))
-        style.configure("HeaderSub.TLabel", background=HEADER_BG, foreground=HEADER_SUB,
-                        font=("Microsoft YaHei UI", 9))
+        style.configure("HeaderTitle.TLabel", background=HEADER_BG, foreground="#ffffff", font=("Microsoft YaHei UI", 15, "bold"))
+        style.configure("HeaderSub.TLabel", background=HEADER_BG, foreground=HEADER_SUB, font=("Microsoft YaHei UI", 9))
         style.configure("Footer.TFrame", background=FOOTER_BG)
-        style.configure("Footer.TLabel", background=FOOTER_BG, foreground=MUTED,
-                        font=("Microsoft YaHei UI", 9))
+        style.configure("Footer.TLabel", background=FOOTER_BG, foreground=MUTED, font=("Microsoft YaHei UI", 9))
 
-        # 按钮：主操作蓝色实底，次操作浅底
         style.configure("TButton", font=FONT, padding=(12, 6), background=CARD, foreground=INK)
-        style.map("TButton", background=[("active", "#eef2ff"), ("disabled", "#f1f5f9")])
-        style.configure("Primary.TButton", font=("Microsoft YaHei UI", 10, "bold"),
-                        padding=(14, 6), background=PRIMARY, foreground="#ffffff", borderwidth=0)
-        style.map("Primary.TButton",
-                  background=[("active", PRIMARY_DARK), ("disabled", "#9db9f0")],
-                  foreground=[("disabled", "#ffffff")])
+        style.map("TButton", background=[("active", "#e0e7ff"), ("disabled", "#f1f5f9")])
+        style.configure("Primary.TButton", font=FONT_BOLD, padding=(14, 7), background=PRIMARY, foreground="#ffffff", borderwidth=0)
+        style.map("Primary.TButton", background=[("active", PRIMARY_DARK), ("disabled", "#93c5fd")], foreground=[("disabled", "#ffffff")])
 
-        style.configure("TCombobox", padding=4)
-        style.configure("TEntry", padding=4)
+        style.configure("TCombobox", padding=5)
+        style.configure("TEntry", padding=5)
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", font=FONT, padding=(18, 8))
+        style.configure("TNotebook.Tab", font=FONT_BOLD, padding=(20, 9))
         style.map("TNotebook.Tab", background=[("selected", CARD)], foreground=[("selected", PRIMARY)])
-        style.configure("Status.TLabel", background=BG, foreground=MUTED, font=FONT_STATUS)
-        style.configure("StatusOk.TLabel", background=BG, foreground=OK, font=FONT_STATUS)
-        style.configure("StatusWarn.TLabel", background=BG, foreground=WARN, font=FONT_STATUS)
-        style.configure("StatusHint.TLabel", background=BG, foreground=HINT, font=FONT_STATUS)
-        style.configure(
-            "Treeview", font=FONT, rowheight=30, background=CARD,
-            fieldbackground=CARD, borderwidth=0,
-        )
-        style.configure("Treeview.Heading",
-                        font=("Microsoft YaHei UI", 10, "bold"),
-                        padding=(8, 8), background="#f1f5f9", relief="flat")
+
+        style.configure("Status.TLabel", background=CARD, foreground=MUTED, font=FONT_STATUS)
+        style.configure("StatusOk.TLabel", background=CARD, foreground=OK, font=FONT_STATUS)
+        style.configure("StatusWarn.TLabel", background=CARD, foreground=WARN, font=FONT_STATUS)
+        style.configure("StatusHint.TLabel", background=CARD, foreground=HINT, font=FONT_STATUS)
+
+        style.configure("Treeview", font=FONT, rowheight=34, background=CARD, fieldbackground=CARD, borderwidth=0)
+        style.configure("Treeview.Heading", font=FONT_BOLD, padding=(10, 8), background="#e2e8f0", foreground=INK, relief="flat")
         style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", INK)])
 
     # ------------------------------------------------------------------ 登录
     def _credentials(self) -> dict:
-        """从 config.json 读账号；文件不存在就写入默认 root/123456。"""
         try:
             if CONFIG_FILE.is_file():
                 data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                if (
-                    isinstance(data, dict)
-                    and data.get("username")
-                    and data.get("password") is not None
-                ):
-                    return {
-                        "username": str(data["username"]),
-                        "password": str(data["password"]),
-                    }
-            CONFIG_FILE.write_text(
-                json.dumps(DEFAULT_CREDENTIALS, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+                if isinstance(data, dict) and data.get("username") and data.get("password") is not None:
+                    return {"username": str(data["username"]), "password": str(data["password"])}
+            CONFIG_FILE.write_text(json.dumps(DEFAULT_CREDENTIALS, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         except (OSError, ValueError):
-            pass  # 配置读写失败就用默认账号，不让登录卡死
+            pass
         return dict(DEFAULT_CREDENTIALS)
 
     def _show_login(self) -> None:
@@ -188,26 +172,28 @@ class App(tk.Tk):
         self.login_frame.pack(fill="both", expand=True)
 
         inner = ttk.Frame(self.login_frame)
-        inner.place(relx=0.5, rely=0.42, anchor="center")
+        inner.place(relx=0.5, rely=0.45, anchor="center")
 
-        ttk.Label(inner, text="月度项目分配管理", style="Title.TLabel").pack(pady=(0, 24))
-
-        card = ttk.Frame(inner, style="Card.TFrame", padding=(30, 24, 30, 18))
+        card = ttk.Frame(inner, style="Card.TFrame", padding=(38, 32, 38, 28))
         card.pack()
-        ttk.Label(card, text="用户名", style="Card.TLabel").grid(row=0, column=0, sticky="w", pady=7)
-        user_entry = ttk.Entry(card, textvariable=self.login_user_var, width=24, font=FONT_LOGIN)
-        user_entry.grid(row=0, column=1, padx=(12, 0), pady=7, ipady=2)
-        ttk.Label(card, text="密  码", style="Card.TLabel").grid(row=1, column=0, sticky="w", pady=7)
-        pass_entry = ttk.Entry(card, textvariable=self.login_pass_var, width=24, show="•", font=FONT_LOGIN)
-        pass_entry.grid(row=1, column=1, padx=(12, 0), pady=7, ipady=2)
+        ttk.Label(card, text="📊 月度项目分配管理", style="CardBold.TLabel", font=FONT_TITLE).grid(row=0, column=0, columnspan=2, pady=(0, 4))
+        ttk.Label(card, text="Monthly Project Allocation Management · 安全单机版", style="CardMuted.TLabel").grid(row=1, column=0, columnspan=2, pady=(0, 22))
+
+        ttk.Label(card, text="登录账号", style="CardBold.TLabel").grid(row=2, column=0, sticky="w", pady=8)
+        user_entry = ttk.Entry(card, textvariable=self.login_user_var, width=26, font=FONT_LOGIN)
+        user_entry.grid(row=2, column=1, padx=(14, 0), pady=8, ipady=3)
+
+        ttk.Label(card, text="安全密码", style="CardBold.TLabel").grid(row=3, column=0, sticky="w", pady=8)
+        pass_entry = ttk.Entry(card, textvariable=self.login_pass_var, width=26, show="•", font=FONT_LOGIN)
+        pass_entry.grid(row=3, column=1, padx=(14, 0), pady=8, ipady=3)
 
         self.login_msg = ttk.Label(card, text="", style="Card.TLabel", foreground=WARN)
-        self.login_msg.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.login_msg.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         buttons = ttk.Frame(card, style="Card.TFrame")
-        buttons.grid(row=3, column=0, columnspan=2, pady=(14, 2))
-        ttk.Button(buttons, text="登  录", style="Primary.TButton", command=self._try_login).pack(side="left", padx=6)
-        ttk.Button(buttons, text="退  出", command=self.destroy).pack(side="left", padx=6)
+        buttons.grid(row=5, column=0, columnspan=2, pady=(18, 2))
+        ttk.Button(buttons, text="立即登录", style="Primary.TButton", command=self._try_login).pack(side="left", padx=6)
+        ttk.Button(buttons, text="退出程序", command=self.destroy).pack(side="left", padx=6)
 
         for entry in (user_entry, pass_entry):
             entry.bind("<Return>", lambda _e: self._try_login())
@@ -229,19 +215,23 @@ class App(tk.Tk):
             messagebox.showerror("登录失败", "连续 3 次输入错误，程序退出。", parent=self)
             self.destroy()
             return
-        self.login_msg.configure(
-            text=f"用户名或密码错误，第 {self._login_failures} 次"
-        )
+        self.login_msg.configure(text=f"⚠️ 用户名或密码错误，第 {self._login_failures}/3 次")
 
     # ------------------------------------------------------------------ 布局
     def _build_main(self) -> None:
-        # 顶栏（深色）
-        header = ttk.Frame(self, style="Header.TFrame", padding=(20, 14, 20, 14))
+        header = ttk.Frame(self, style="Header.TFrame", padding=(22, 14, 22, 14))
         header.pack(fill="x")
-        ttk.Label(header, text="月度项目分配管理", style="HeaderTitle.TLabel").pack(anchor="w")
-        ttk.Label(header, text="Monthly Project Allocation Management", style="HeaderSub.TLabel").pack(anchor="w", pady=(2, 0))
+        left_h = ttk.Frame(header, style="Header.TFrame")
+        left_h.pack(side="left")
+        ttk.Label(left_h, text="📊 月度项目分配管理工作台", style="HeaderTitle.TLabel").pack(anchor="w")
+        ttk.Label(left_h, text="Monthly Project Allocation Management · 自动判重 / 原子保存 / 备份审计", style="HeaderSub.TLabel").pack(anchor="w", pady=(2, 0))
 
-        # 底栏（浅灰）
+        right_h = ttk.Frame(header, style="Header.TFrame")
+        right_h.pack(side="right")
+        ttk.Button(right_h, text="📂 导入 Excel 工作簿…", style="Primary.TButton", command=self._import_excel).pack(side="right")
+        self.file_label = ttk.Label(right_h, text="尚未加载工作簿", style="HeaderSub.TLabel")
+        self.file_label.pack(side="right", padx=(0, 14))
+
         footer = ttk.Frame(self, style="Footer.TFrame", padding=(20, 6))
         footer.pack(fill="x", side="bottom")
         self.footer_left = ttk.Label(footer, text="", style="Footer.TLabel")
@@ -249,22 +239,22 @@ class App(tk.Tk):
         self.footer_right = ttk.Label(footer, text="", style="Footer.TLabel")
         self.footer_right.pack(side="right")
 
-        # 主体
-        outer = ttk.Frame(self, padding=(18, 14, 18, 10))
+        outer = ttk.Frame(self, padding=(18, 12, 18, 10))
         outer.pack(fill="both", expand=True)
 
-        bar = ttk.Frame(outer)
-        bar.pack(fill="x", pady=(0, 10))
-        ttk.Button(bar, text="导入 Excel…", command=self._import_excel).pack(side="left")
-        self.file_label = ttk.Label(bar, text="", style="Muted.TLabel")
-        self.file_label.pack(side="left", padx=(12, 0))
+        # 顶部 3 张 KPI 指标卡
+        kpi_row = ttk.Frame(outer)
+        kpi_row.pack(fill="x", pady=(0, 12))
+        self.kpi_people_val, self.kpi_people_sub = self._create_kpi_card(kpi_row, "👥 当月已分配人员", "0 / 0 人", "覆盖率 0%")
+        self.kpi_proj_val, self.kpi_proj_sub = self._create_kpi_card(kpi_row, "🏷️ 当月分配项目总数", "0 项", "人均 0.0 项")
+        self.kpi_dup_val, self.kpi_dup_sub = self._create_kpi_card(kpi_row, "⚠️ 同月多人重合项目", "0 项", "无跨人员重复项目", warn=True)
 
         self.notebook = ttk.Notebook(outer)
         self.notebook.pack(fill="both", expand=True)
-        self.assign_tab = ttk.Frame(self.notebook, padding=(12, 12))
-        self.search_tab = ttk.Frame(self.notebook, padding=(12, 12))
-        self.notebook.add(self.assign_tab, text="  分 配  ")
-        self.notebook.add(self.search_tab, text="  检 索  ")
+        self.assign_tab = ttk.Frame(self.notebook, padding=(10, 10))
+        self.search_tab = ttk.Frame(self.notebook, padding=(10, 10))
+        self.notebook.add(self.assign_tab, text="  📝 月度分配与修改工作台  ")
+        self.notebook.add(self.search_tab, text="  🔍 全局历史检索与审计  ")
         self.notebook.enable_traversal()
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
@@ -276,58 +266,90 @@ class App(tk.Tk):
         else:
             self._enter_empty_state()
 
+    def _create_kpi_card(self, parent, title: str, init_val: str, init_sub: str, warn: bool = False):
+        card = ttk.Frame(parent, style="Card.TFrame", padding=(16, 10))
+        card.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ttk.Label(card, text=title, style="CardMuted.TLabel").pack(anchor="w")
+        val_lbl = ttk.Label(card, text=init_val, style="MetricWarn.TLabel" if warn else "MetricVal.TLabel")
+        val_lbl.pack(anchor="w", pady=(2, 2))
+        sub_lbl = ttk.Label(card, text=init_sub, style="CardMuted.TLabel")
+        sub_lbl.pack(anchor="w")
+        return val_lbl, sub_lbl
+
     def _build_assign_tab(self) -> None:
         tab = self.assign_tab
+        body = ttk.Frame(tab)
+        body.pack(fill="both", expand=True)
 
-        card = ttk.Frame(tab, style="Card.TFrame", padding=(16, 14))
-        card.pack(fill="x")
+        # 左侧操作控制台卡片
+        left_card = ttk.Frame(body, style="Card.TFrame", padding=(18, 16))
+        left_card.pack(side="left", fill="y", padx=(0, 12))
 
-        row1 = ttk.Frame(card, style="Card.TFrame")
-        row1.pack(fill="x", pady=(0, 10))
-        ttk.Label(row1, text="分配月份", style="Card.TLabel").pack(side="left")
-        self.month_btn = ttk.Button(row1, text="选择月份", command=self._open_month_picker, width=14)
-        self.month_btn.pack(side="left", padx=(8, 22))
-        ttk.Label(row1, text="分配人员", style="Card.TLabel").pack(side="left")
-        self.person_box = ttk.Combobox(row1, textvariable=self.person_var, width=12, font=FONT)
-        self.person_box.pack(side="left", padx=(8, 0))
+        ttk.Label(left_card, text="1. 选择分配月份", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
+        m_row = ttk.Frame(left_card, style="Card.TFrame")
+        m_row.pack(fill="x", pady=(0, 14))
+        self.prev_m_btn = ttk.Button(m_row, text="◀", width=3, command=lambda: self._step_month(-1))
+        self.prev_m_btn.pack(side="left")
+        self.month_btn = ttk.Button(m_row, text="选择月份", command=self._open_month_picker, width=16)
+        self.month_btn.pack(side="left", padx=6)
+        self.next_m_btn = ttk.Button(m_row, text="▶", width=3, command=lambda: self._step_month(1))
+        self.next_m_btn.pack(side="left")
+
+        ttk.Label(left_card, text="2. 选择或新增人员", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
+        p_row = ttk.Frame(left_card, style="Card.TFrame")
+        p_row.pack(fill="x", pady=(0, 14))
+        self.person_box = ttk.Combobox(p_row, textvariable=self.person_var, width=16, font=FONT)
+        self.person_box.pack(side="left")
         self.person_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh())
         self.person_box.bind("<KeyRelease>", self._on_assign_person_key)
-        self.add_person_btn = ttk.Button(row1, text="＋ 人员", width=8, command=self._add_person)
+        self.add_person_btn = ttk.Button(p_row, text="＋ 人员", width=8, command=self._add_person)
         self.add_person_btn.pack(side="left", padx=(8, 0))
 
-        row2 = ttk.Frame(card, style="Card.TFrame")
-        row2.pack(fill="x")
-        ttk.Label(row2, text="原项目号", style="Card.TLabel").pack(side="left")
-        self.old_box = ttk.Combobox(row2, textvariable=self.old_var, state="readonly", width=18, font=FONT)
-        self.old_box.pack(side="left", padx=(8, 20))
-        self.old_box.bind("<<ComboboxSelected>>", lambda _e: self._update_status())
-        ttk.Label(row2, text="项目编号", style="Card.TLabel").pack(side="left")
-        self.pid_box = ttk.Combobox(row2, textvariable=self.pid_var, width=18, font=FONT)
-        self.pid_box.pack(side="left", padx=(8, 14))
+        ttk.Label(left_card, text="3. 录入项目编号", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
+        pid_row = ttk.Frame(left_card, style="Card.TFrame")
+        pid_row.pack(fill="x", pady=(0, 14))
+        self.pid_box = ttk.Combobox(pid_row, textvariable=self.pid_var, width=16, font=FONT)
+        self.pid_box.pack(side="left")
         self.pid_box.bind("<Return>", lambda _e: self._do_assign())
         self.pid_box.bind("<KeyRelease>", self._on_pid_change)
         self.pid_box.bind("<<ComboboxSelected>>", lambda _e: self._update_status())
-        self.add_project_btn = ttk.Button(row2, text="＋ 项目号", width=9, command=self._add_project)
-        self.add_project_btn.pack(side="left", padx=(0, 14))
-        self.assign_btn = ttk.Button(row2, text="确认分配", style="Primary.TButton", command=self._do_assign)
-        self.assign_btn.pack(side="left")
-        self.modify_btn = ttk.Button(row2, text="修改项目号", command=self._do_modify)
-        self.modify_btn.pack(side="left", padx=(10, 0))
+        self.add_project_btn = ttk.Button(pid_row, text="＋ 项目号", width=8, command=self._add_project)
+        self.add_project_btn.pack(side="left", padx=(8, 0))
 
-        self.status = ttk.Label(tab, text="", style="Status.TLabel")
-        self.status.pack(anchor="w", pady=(14, 0))
+        ttk.Label(left_card, text="4. 手误修改 (可选原项目号替换)", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
+        self.old_box = ttk.Combobox(left_card, textvariable=self.old_var, state="readonly", width=26, font=FONT)
+        self.old_box.pack(anchor="w", pady=(0, 16))
+        self.old_box.bind("<<ComboboxSelected>>", lambda _e: self._update_status())
 
-        self.summary = ttk.Label(tab, text="", style="Muted.TLabel")
-        self.summary.pack(anchor="w", pady=(14, 6))
+        act_row = ttk.Frame(left_card, style="Card.TFrame")
+        act_row.pack(fill="x", pady=(4, 12))
+        self.assign_btn = ttk.Button(act_row, text="✓ 确认分配", style="Primary.TButton", command=self._do_assign)
+        self.assign_btn.pack(side="left", fill="x", expand=True)
+        self.modify_btn = ttk.Button(act_row, text="✎ 替换修改", command=self._do_modify)
+        self.modify_btn.pack(side="left", padx=(8, 0))
 
-        wrap = ttk.Frame(tab)
+        self.status = ttk.Label(left_card, text="", style="Status.TLabel", wraplength=260)
+        self.status.pack(anchor="w", pady=(8, 0))
+
+        # 右侧当月分配全景表
+        right_card = ttk.Frame(body, style="Card.TFrame", padding=(14, 12))
+        right_card.pack(side="left", fill="both", expand=True)
+
+        top_bar = ttk.Frame(right_card, style="Card.TFrame")
+        top_bar.pack(fill="x", pady=(0, 8))
+        self.summary = ttk.Label(top_bar, text="请先点击右上角「导入 Excel 工作簿…」", style="CardBold.TLabel")
+        self.summary.pack(side="left")
+
+        wrap = ttk.Frame(right_card, style="Card.TFrame")
         wrap.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(wrap, columns=[c[0] for c in ASSIGN_COLUMNS], show="headings", height=9)
+        self.tree = ttk.Treeview(wrap, columns=[c[0] for c in ASSIGN_COLUMNS], show="headings", height=14)
         for key, title, width in ASSIGN_COLUMNS:
             self.tree.heading(key, text=title, anchor="w")
             self.tree.column(key, width=width, anchor="w", stretch=(key == "project"))
-        self.tree.tag_configure("done", foreground=OK)
-        self.tree.tag_configure("todo", foreground="#98a2b3")
+        self.tree.tag_configure("done", foreground=INK)
+        self.tree.tag_configure("dup", background="#fef3c7", foreground="#92400e")
+        self.tree.tag_configure("todo", foreground="#94a3b8")
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select_person)
         scroll = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -335,8 +357,14 @@ class App(tk.Tk):
 
     def _build_search_tab(self) -> None:
         tab = self.search_tab
+        body = ttk.Frame(tab)
+        body.pack(fill="both", expand=True)
 
-        card = ttk.Frame(tab, style="Card.TFrame", padding=(18, 16))
+        # 左侧：检索条件 + 结果表
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="both", expand=True)
+
+        card = ttk.Frame(left, style="Card.TFrame", padding=(18, 16))
         card.pack(fill="x")
 
         row1 = ttk.Frame(card, style="Card.TFrame")
@@ -361,9 +389,7 @@ class App(tk.Tk):
         self.search_project_box.pack(side="left", padx=(8, 14))
         ttk.Button(row2, text="查询", style="Primary.TButton", command=self._do_search).pack(side="left")
 
-        self.search_count = ttk.Label(
-            card, text="导入文件后，这里会显示检索结果", style="Muted.TLabel"
-        )
+        self.search_count = ttk.Label(card, text="导入文件后，这里会显示检索结果", style="Muted.TLabel")
         self.search_count.pack(anchor="w", pady=(10, 0))
 
         # 输入即查（防抖），不用点「查询」；下拉选择后立即查
@@ -374,16 +400,36 @@ class App(tk.Tk):
         self.search_project_box.bind("<<ComboboxSelected>>", lambda _e: self._schedule_search(0))
         self.search_project_box.bind("<Return>", lambda _e: self._do_search())
 
-        wrap = ttk.Frame(tab)
+        wrap = ttk.Frame(left)
         wrap.pack(fill="both", expand=True)
         self.search_tree = ttk.Treeview(wrap, columns=[c[0] for c in SEARCH_COLUMNS], show="headings", height=16)
         for key, title, width in SEARCH_COLUMNS:
             self.search_tree.heading(key, text=title, anchor="w")
             self.search_tree.column(key, width=width, anchor="w", stretch=(key == "project"))
+        self.search_tree.bind("<<TreeviewSelect>>", self._on_search_select)
         scroll = ttk.Scrollbar(wrap, orient="vertical", command=self.search_tree.yview)
         self.search_tree.configure(yscrollcommand=scroll.set)
         self.search_tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+
+        # 右侧：审计时间轴卡片
+        right_card = ttk.Frame(body, style="Card.TFrame", padding=(14, 12))
+        right_card.pack(side="right", fill="y", padx=(12, 0))
+        ttk.Label(right_card, text="📜 分配轨迹审计", style="CardBold.TLabel").pack(anchor="w", pady=(0, 6))
+        self.audit_title = ttk.Label(
+            right_card, text="选中左侧任意记录，这里显示该人员的全部历史分配", style="CardMuted.TLabel", wraplength=280
+        )
+        self.audit_title.pack(anchor="w", pady=(0, 8))
+        awrap = ttk.Frame(right_card, style="Card.TFrame")
+        awrap.pack(fill="both", expand=True)
+        self.audit_tree = ttk.Treeview(awrap, columns=[c[0] for c in AUDIT_COLUMNS], show="headings", height=22)
+        for key, title, width in AUDIT_COLUMNS:
+            self.audit_tree.heading(key, text=title, anchor="w")
+            self.audit_tree.column(key, width=width, anchor="w")
+        ascroll = ttk.Scrollbar(awrap, orient="vertical", command=self.audit_tree.yview)
+        self.audit_tree.configure(yscrollcommand=ascroll.set)
+        self.audit_tree.pack(side="left", fill="both", expand=True)
+        ascroll.pack(side="right", fill="y")
 
     # ------------------------------------------------------------------ 月份选择
     def _open_month_picker(self) -> None:
@@ -442,6 +488,13 @@ class App(tk.Tk):
         self.month_key = key
         self._update_month_button()
         self._refresh()
+
+    def _step_month(self, delta: int) -> None:
+        if self.store is None:
+            return
+        year, month = self.month_key if self.month_key else (datetime.now().year, datetime.now().month)
+        total = year * 12 + (month - 1) + delta
+        self._set_month((total // 12, total % 12 + 1))
 
     def _update_month_button(self) -> None:
         text = month_label(self.month_key) if self.month_key else "选择月份"
@@ -530,18 +583,23 @@ class App(tk.Tk):
 
         self.tree.delete(*self.tree.get_children())
         self.search_tree.delete(*self.search_tree.get_children())
-        self.file_label.configure(text="点「导入 Excel…」选择要编辑的 Excel")
-        self.summary.configure(text="尚未打开文件")
+        self.audit_tree.delete(*self.audit_tree.get_children())
+        self.file_label.configure(text="尚未加载工作簿")
+        self.summary.configure(text="请先点击右上角「导入 Excel 工作簿…」")
+        self.audit_title.configure(text="选中左侧任意记录，这里显示该人员的全部历史分配")
         self.search_count.configure(text="导入文件后，这里会显示检索结果")
         self._apply_enabled(False)
-        self._set_status("请先点击上方「导入 Excel…」选择 Excel 文件", MUTED)
+        self._set_status("请先点击右上角「导入 Excel 工作簿…」选择 Excel 文件", MUTED)
+        self._zero_kpi()
         self._update_footer()
 
     def _apply_enabled(self, enabled: bool) -> None:
         state = ["!disabled"] if enabled else ["disabled"]
         for widget in (
-            self.month_btn, self.person_box, self.add_person_btn, self.old_box,
-            self.pid_box, self.add_project_btn, self.search_person_box, self.search_project_box,
+            self.prev_m_btn, self.next_m_btn, self.month_btn,
+            self.person_box, self.add_person_btn, self.old_box,
+            self.pid_box, self.add_project_btn,
+            self.search_person_box, self.search_project_box,
         ):
             widget.state(state)
         if not enabled:
@@ -559,33 +617,69 @@ class App(tk.Tk):
         else:
             self.footer_right.configure(text="尚未加载数据")
 
+    # ------------------------------------------------------------------ KPI
+    def _update_kpi(self, assigned: int, total_people: int, total_projects: int, dup_count: int) -> None:
+        coverage = (assigned * 100.0 / total_people) if total_people else 0.0
+        per_capita = (total_projects / total_people) if total_people else 0.0
+        self.kpi_people_val.configure(text=f"{assigned} / {total_people} 人")
+        self.kpi_people_sub.configure(text=f"覆盖率 {coverage:.0f}%")
+        self.kpi_proj_val.configure(text=f"{total_projects} 项")
+        self.kpi_proj_sub.configure(text=f"人均 {per_capita:.1f} 项")
+        self.kpi_dup_val.configure(text=f"{dup_count} 项")
+        self.kpi_dup_sub.configure(text="存在跨人员重复项目" if dup_count else "无跨人员重复项目")
+
+    def _zero_kpi(self) -> None:
+        if not hasattr(self, "kpi_people_val"):
+            return
+        self.kpi_people_val.configure(text="0 / 0 人")
+        self.kpi_people_sub.configure(text="覆盖率 0%")
+        self.kpi_proj_val.configure(text="0 项")
+        self.kpi_proj_sub.configure(text="人均 0.0 项")
+        self.kpi_dup_val.configure(text="0 项")
+        self.kpi_dup_sub.configure(text="无跨人员重复项目")
+
     # ------------------------------------------------------------------ 刷新
     def _refresh(self) -> None:
         if self.store is None:
+            self._zero_kpi()
             return
         key = self._current_key()
         self.tree.delete(*self.tree.get_children())
         if key is None:
             self.summary.configure(text="请选择有效的月份")
+            self._zero_kpi()
             return
         people = self.store.people()
         assigned_people = 0
+        total_projects = 0
         max_display = 0
+
+        # 当月跨人员重复项目统计（与高亮同口径）
+        cross_counter: Counter = Counter()
+        for name in people:
+            for project in self.store.projects_of(key, name):
+                cross_counter[project] += 1
+
         for name in people:
             projects = self.store.projects_of(key, name)
-            joined = "、".join(projects)
+            joined = "  ".join(f"[{p}]" for p in projects)
             max_display = max(max_display, len(joined))
             if projects:
                 assigned_people += 1
+                total_projects += len(projects)
+                dup_hit = any(cross_counter[p] > 1 for p in projects)
                 self.tree.insert(
                     "", "end",
                     values=(name, joined, f"{len(projects)} 个", self.store.assigned_at(key, name) or "—"),
-                    tags=("done",),
+                    tags=("done", "dup") if dup_hit else ("done",),
                 )
             else:
                 self.tree.insert("", "end", values=(name, "—", "未分配", ""), tags=("todo",))
-        self.tree.column("project", width=max(200, min(max_display * 12 + 24, 760)))
+        self.tree.column("project", width=max(260, min(max_display * 13 + 24, 760)))
         self.summary.configure(text=f"{month_label(key)} 分配情况　{assigned_people}/{len(people)} 人已分配")
+
+        dup_count = sum(1 for count in cross_counter.values() if count > 1)
+        self._update_kpi(assigned_people, len(people), total_projects, dup_count)
 
         self._all_ids = self.store.all_project_ids()
         self.search_project_box["values"] = self._all_ids
@@ -683,6 +777,16 @@ class App(tk.Tk):
         )
         self._refresh_old_options()
         self._update_status()
+
+    def _on_tree_select_person(self, _event=None) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            return
+        values = self.tree.item(sel[0], "values")
+        if values:
+            self.person_var.set(values[0])
+            self._refresh_old_options()
+            self._update_status()
 
     # ------------------------------------------------------------------ 动作
     def _add_person(self) -> None:
@@ -892,6 +996,23 @@ class App(tk.Tk):
         for key, name, pid, when in rows:
             self.search_tree.insert("", "end", values=(month_label(key), name, pid, when or "—"))
         self.search_count.configure(text=f"项目号「{project}」：共 {len(rows)} 条记录")
+
+    # ------------------------------------------------------------------ 审计时间轴
+    def _on_search_select(self, _event=None) -> None:
+        self.audit_tree.delete(*self.audit_tree.get_children())
+        if self.store is None:
+            return
+        sel = self.search_tree.selection()
+        if not sel:
+            return
+        values = self.search_tree.item(sel[0], "values")
+        if not values:
+            return
+        name = values[1]  # SEARCH_COLUMNS: 月份, 人员, 项目号, 时间
+        rows = self.store.search_by_person(name)
+        self.audit_title.configure(text=f"「{name}」全部历史分配，共 {len(rows)} 条")
+        for key, person, pid, when in rows:
+            self.audit_tree.insert("", "end", values=(month_label(key), pid, when or "—"))
 
 
 def run(store: Optional[ExcelStore] = None) -> None:
