@@ -213,8 +213,10 @@ class Workbench(QMainWindow):
         self.status = label("离线 · 可生成命令", "Status")
         self.status.setWordWrap(False)
         bar.addWidget(self.status)
-        self.start_stk = button("启动 / 连接 STK", lambda: self.run_action("start"))
+        self.start_stk = button("启动 STK", lambda: self.run_action("start"))
+        self.attach_stk = button("连接已打开的 STK", lambda: self.run_action("attach"))
         bar.addWidget(self.start_stk)
+        bar.addWidget(self.attach_stk)
         whole.addWidget(header)
 
         middle = QHBoxLayout()
@@ -624,8 +626,13 @@ class Workbench(QMainWindow):
             return
         plan = self.plan if action == "run" else None
         self.start_stk.setEnabled(False)
+        self.attach_stk.setEnabled(False)
         self.run_button.setEnabled(False)
-        self.notice.setText("正在执行。STK 首次启动可能需要一些时间。" if action == "start" else "正在等待 STK 返回结果。")
+        self.notice.setText({
+            "start": "正在启动或连接 STK。首次启动可能需要一些时间。",
+            "attach": "正在连接已经打开的 STK。",
+            "run": "正在等待 STK 返回结果。",
+        }[action])
         self.result.clear()
         self.tabs.setCurrentIndex(1)
         self.worker = Worker(action, plan, self.connected_scenario if plan else "", self)
@@ -685,6 +692,7 @@ class Workbench(QMainWindow):
         self.worker.deleteLater()
         self.worker = None
         self.start_stk.setEnabled(True)
+        self.attach_stk.setEnabled(True)
         self.run_button.setEnabled(self.plan is not None)
 
     def closeEvent(self, event):

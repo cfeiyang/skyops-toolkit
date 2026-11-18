@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import subprocess
+import sys
 
 # The command text travels as JSON over stdin. It is never evaluated as PowerShell.
 SCRIPT = r"""
@@ -30,18 +31,34 @@ try {
     try {
         $app = [Runtime.InteropServices.Marshal]::GetActiveObject($progId)
     } catch {
-        if ($request.action -ne 'start') {
-            throw '未找到正在运行的 STK 12。请从这里点击“启动 / 连接 STK”，或在同一 Windows 用户下手动启动 STK。'
+        $cause = $_.Exception.GetBaseException()
+        $code = '{0:X8}' -f $cause.HResult
+        if ($code -notin @('800401E3', '800401E5')) {
+            throw ("查找已运行的 STK 12 失败（0x{0}）。{1}" -f $code, $cause.Message)
         }
-        $app = New-Object -ComObject $progId
+        if ($request.action -ne 'start') {
+            throw '未找到可连接的 STK 12。请从开始菜单正常打开 STK 12，等主界面加载完，再点击「连接已打开的 STK」。请让两个程序使用相同的 Windows 用户和权限级别。'
+        }
+        try {
+            $app = New-Object -ComObject $progId
+            $app.UserControl = $true
+            $app.Visible = $true
+        } catch {
+            $detail = $_.Exception.Message
+            $code = '{0:X8}' -f $_.Exception.GetBaseException().HResult
+            if ($code -eq '80080005' -or $detail -match '(?i)\b(?:0x)?80080005\b') {
+                throw "Windows 未能通过 COM 启动 STK 12（0x80080005）。请先从开始菜单打开 STK 12，处理 STK 显示的任何启动提示。主界面加载后，点击「连接已打开的 STK」。`n`n原始错误：$detail"
+            }
+            throw "无法自动启动 STK 12（0x$code）。可以先手动打开 STK，再点击「连接已打开的 STK」。`n`n原始错误：$detail"
+        }
     }
-    if ($request.action -eq 'start') {
-        $app.UserControl = $true
-        $app.Visible = $true
+    try {
+        $root = $app.Personality2
+        $reply.version = @(Read-Result ($root.ExecuteCommand('GetSTKVersion /'))) -join ' '
+        $current = $root.CurrentScenario
+    } catch {
+        throw "已经找到 STK 12，但读取其自动化接口失败。请确认 STK 主界面已加载并关闭启动提示。`n`n原始错误：$($_.Exception.Message)"
     }
-    $root = $app.Personality2
-    $reply.version = @(Read-Result ($root.ExecuteCommand('GetSTKVersion /'))) -join ' '
-    $current = $root.CurrentScenario
     if ($null -ne $current) {
         $reply.scenario = [string]$current.InstanceName
     }
@@ -104,12 +121,38 @@ def invoke(action, plan=None, expected_scenario=""):
     request = {"action": action, "commands": list(plan.commands) if plan else [],
                "requires_scenario": bool(plan and plan.requires_scenario),
                "expected_scenario": expected_scenario}
-    process = subprocess.run([str(ps), "-NoProfile", "-NonInteractive", "-STA",
-                              "-EncodedCommand", encoded],
-                             input=json.dumps(request, ensure_ascii=False),
-                             encoding="utf-8", capture_output=True,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
+    process = open_powershell(ps, encoded)
+    stdout, stderr = process.communicate(json.dumps(request, ensure_ascii=False))
     try:
-        return json.loads(process.stdout.strip().lstrip("\ufeff"))
+        return json.loads(stdout.strip().lstrip("\ufeff"))
     except ValueError as error:
-        raise RuntimeError(process.stderr.strip() or "STK 控制进程未返回可读结果。") from error
+        raise RuntimeError(stderr.strip() or "STK 控制进程未返回可读结果。") from error
+
+
+def open_powershell(executable, encoded):
+    args = [str(executable), "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", encoded]
+    options = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                   encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
+    bundle = getattr(sys, "_MEIPASS", None)
+    if not bundle:
+        return subprocess.Popen(args, **options)
+
+    # External applications should use their own DLLs, not the PyInstaller bundle.
+    import ctypes
+    from ctypes import wintypes
+
+    bundle_path = Path(os.path.abspath(bundle))
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join(
+        entry for entry in env.get("PATH", "").split(os.pathsep)
+        if entry and not Path(os.path.abspath(entry.strip('"'))).is_relative_to(bundle_path)
+    )
+    set_dll_directory = ctypes.WinDLL("kernel32", use_last_error=True).SetDllDirectoryW
+    set_dll_directory.argtypes = [wintypes.LPCWSTR]
+    set_dll_directory.restype = wintypes.BOOL
+    if not set_dll_directory(None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return subprocess.Popen(args, env=env, **options)
+    finally:
+        set_dll_directory(bundle)

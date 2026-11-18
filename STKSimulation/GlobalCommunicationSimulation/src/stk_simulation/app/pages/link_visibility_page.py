@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QScrollArea,
     QSlider,
     QSpinBox,
@@ -37,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from stk_simulation.app.icons import action_button, apply_icon
 from stk_simulation.simulations.link_visibility.config import (
     LinkStationConfig,
     LinkVisibilityConfig,
@@ -233,6 +233,8 @@ def _metric_card(title: str) -> tuple[QFrame, QLabel, QLabel]:
 
 
 def _fill_table(table: QTableWidget, headers: tuple[str, ...], rows) -> None:
+    table.setAlternatingRowColors(True)
+    table.setShowGrid(False)
     table.setRowCount(len(rows))
     table.setColumnCount(len(headers))
     table.setHorizontalHeaderLabels(list(headers))
@@ -308,8 +310,7 @@ class LinkVisibilityPage(QWidget):
         self.dl_fmt.addItem("CSV", "csv")
         self.dl_fmt.addItem("PDF", "pdf")
         dl_row.addWidget(self.dl_fmt)
-        self.dl_btn = QPushButton("⬇ 下载")
-        self.dl_btn.setObjectName("primaryButton")
+        self.dl_btn = action_button("下载", "download", primary=True)
         self.dl_btn.setEnabled(False)
         self.dl_btn.clicked.connect(self._export_selected)
         dl_row.addWidget(self.dl_btn)
@@ -333,9 +334,9 @@ class LinkVisibilityPage(QWidget):
         map_layout.addWidget(self.map_widget)
 
         ctrl = QHBoxLayout()
-        self.btn_play = QPushButton("▶ 动画播放")
+        self.btn_play = action_button("动画播放", "play")
         self.btn_play.clicked.connect(self._toggle_play)
-        self.btn_reset = QPushButton("⟲ 重置")
+        self.btn_reset = action_button("重置", "rotate-ccw")
         self.btn_reset.clicked.connect(self.map_widget.reset)
         self.speed_combo = QComboBox()
         for value in ("60", "300", "600", "1200", "3600"):
@@ -375,7 +376,7 @@ class LinkVisibilityPage(QWidget):
         up = QHBoxLayout()
         self.tle_file_label = QLabel("未选择本地文件")
         self.tle_file_label.setObjectName("hintLabel")
-        btn = QPushButton("上传 TLE 文件（.tle / .txt，可选）")
+        btn = action_button("选择 TLE 文件", "upload")
         btn.clicked.connect(self._pick_tle)
         up.addWidget(self.tle_file_label, 1)
         up.addWidget(btn)
@@ -450,8 +451,7 @@ class LinkVisibilityPage(QWidget):
         self.days_spin.setRange(1, 8)
         self.days_spin.setValue(1)
         layout.addWidget(self.days_spin)
-        self.run_btn = QPushButton("计算两地通信时长")
-        self.run_btn.setObjectName("primaryButton")
+        self.run_btn = action_button("计算两地通信时长", "play", primary=True)
         self.run_btn.clicked.connect(lambda: self._emit_run())
         layout.addWidget(self.run_btn, 1)
         return card
@@ -496,9 +496,11 @@ class LinkVisibilityPage(QWidget):
     def _toggle_play(self) -> None:
         self.map_widget.play_pause()
         if self.map_widget._playing:
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
+            apply_icon(self.btn_play, "pause")
         else:
-            self.btn_play.setText("▶ 继续动画" if self.map_widget._idx > 0 else "▶ 动画播放")
+            self.btn_play.setText("继续动画" if self.map_widget._idx > 0 else "动画播放")
+            apply_icon(self.btn_play, "play")
 
     def _on_slider(self, value: int) -> None:
         self.map_widget.set_position(value)
@@ -541,7 +543,8 @@ class LinkVisibilityPage(QWidget):
         # 地图动画
         self.map_widget.set_data(result.ground_track, result.cfg.stations, result.cfg.coarse_step_sec)
         self.slider.setRange(0, max(len(result.ground_track) - 1, 0))
-        self.btn_play.setText("▶ 动画播放")
+        self.btn_play.setText("动画播放")
+        apply_icon(self.btn_play, "play")
 
         self.set_status(f"计算完成：两地 {len(result.windows)} 个窗口，累计 {result.total_duration_sec / 3600.0:.2f} h")
 

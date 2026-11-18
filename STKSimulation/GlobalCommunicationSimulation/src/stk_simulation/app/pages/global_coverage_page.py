@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QSpinBox,
     QSplitter,
     QTabWidget,
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from stk_simulation.app.dialogs.station_dialog import StationDialog
+from stk_simulation.app.icons import action_button, icon
 from stk_simulation.app.widgets.plot_widget import PlotWidget
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.presets import (
@@ -55,16 +55,15 @@ class GlobalCoveragePage(QWidget):
         self._config = copy.deepcopy(config)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_scenario_tab(), "场景与覆盖")
-        self.tabs.addTab(self._build_satellite_tab(), "卫星与链路")
-        self.tabs.addTab(self._build_station_tab(), "地面站配置")
+        self.tabs.addTab(self._build_scenario_tab(), icon("globe"), "场景与覆盖")
+        self.tabs.addTab(self._build_satellite_tab(), icon("satellite"), "卫星与链路")
+        self.tabs.addTab(self._build_station_tab(), icon("radio-tower"), "地面站配置")
 
-        self.run_button = QPushButton("开始仿真")
-        self.run_button.setObjectName("primaryButton")
+        self.run_button = action_button("开始仿真", "play", primary=True)
         self.run_button.clicked.connect(lambda: self._request_run("normal"))
-        self.gain_button = QPushButton("计算选中站增益")
+        self.gain_button = action_button("计算选中站增益", "chart-no-axes-column-increasing")
         self.gain_button.clicked.connect(self._request_gain)
-        self.run_all_button = QPushButton("运行文档全部方案")
+        self.run_all_button = action_button("运行文档全部方案", "layers")
         self.run_all_button.clicked.connect(lambda: self._request_run("document"))
         self.status_label = QLabel("就绪")
         self.status_label.setObjectName("statusLabel")
@@ -197,13 +196,13 @@ class GlobalCoveragePage(QWidget):
         self.station_preset_field = QComboBox()
         for label, value in STATION_PRESETS:
             self.station_preset_field.addItem(label, value)
-        load_button = QPushButton("载入预设")
+        load_button = action_button("载入预设", "folder-open")
         load_button.clicked.connect(self._load_station_preset)
-        add_button = QPushButton("添加地面站")
+        add_button = action_button("添加地面站", "plus")
         add_button.clicked.connect(self._add_station)
-        edit_button = QPushButton("编辑选中")
+        edit_button = action_button("编辑选中", "pencil")
         edit_button.clicked.connect(self._edit_selected_station)
-        delete_button = QPushButton("删除选中")
+        delete_button = action_button("删除选中", "trash-2")
         delete_button.clicked.connect(self._delete_selected_stations)
 
         toolbar = QHBoxLayout()
@@ -217,6 +216,8 @@ class GlobalCoveragePage(QWidget):
         toolbar.addStretch(1)
 
         self.station_table = QTableWidget(0, 5)
+        self.station_table.setAlternatingRowColors(True)
+        self.station_table.setShowGrid(False)
         self.station_table.setHorizontalHeaderLabels(
             ("地面站", "纬度 / °", "经度 / °", "海拔 / m", "最低仰角 / °")
         )

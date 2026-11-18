@@ -15,7 +15,7 @@ try:
     binaries += list(stk_binaries)
     hiddenimports += list(stk_hiddenimports)
 except Exception:
-    print("[打包提示] 当前环境未检测到 agi.stk12，将仅打包纯 Python 引擎支持。")
+    print("[打包提示] 当前环境未检测到 agi.stk12，STK 工作台仍可通过本机 COM 连接，仿真引擎将使用 Python。")
 
 for pkg in ("mpl_toolkits.basemap_data", "skyfield", "sgp4"):
     try:
@@ -25,6 +25,8 @@ for pkg in ("mpl_toolkits.basemap_data", "skyfield", "sgp4"):
 
 datas.append((str(app_icon), "stk_simulation/assets"))
 datas.append((str(app_icon.with_name("world.json")), "stk_simulation/assets"))
+datas.append((str(app_icon.with_name("skyops.qss")), "stk_simulation/assets"))
+datas.append((str(app_icon.parent / "icons"), "stk_simulation/assets/icons"))
 
 a = Analysis(
     [str(source_root / "stk_simulation" / "__main__.py")],
