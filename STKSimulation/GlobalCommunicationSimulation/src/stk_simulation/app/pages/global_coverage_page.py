@@ -32,18 +32,10 @@ from stk_simulation.app.widgets.plot_widget import PlotWidget
 from stk_simulation.app.widgets.side_navigation import SectionStack, SideNavigation
 from stk_simulation.simulations.common import SatelliteConfig
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
-from stk_simulation.simulations.global_coverage.presets import (
-    StationConfig,
-    station_template,
-)
+from stk_simulation.simulations.global_coverage.presets import StationConfig
 
 
 SATELLITE_MODES = (("单星", "single"), ("三星几何星间中继", "multi"))
-STATION_PRESETS = (
-    ("上海临港单站", "single"),
-    ("四个国内基本站", "domestic"),
-    ("五站（含墨西哥）", "all"),
-)
 
 
 class GlobalCoveragePage(QWidget):
@@ -198,11 +190,6 @@ class GlobalCoveragePage(QWidget):
 
     def _build_station_tab(self) -> QWidget:
         tab = QWidget()
-        self.station_preset_field = QComboBox()
-        for label, value in STATION_PRESETS:
-            self.station_preset_field.addItem(label, value)
-        load_button = action_button("载入预设", "folder-open")
-        load_button.clicked.connect(self._load_station_preset)
         add_button = action_button("添加地面站", "plus")
         add_button.clicked.connect(self._add_station)
         edit_button = action_button("编辑选中", "pencil")
@@ -211,10 +198,6 @@ class GlobalCoveragePage(QWidget):
         delete_button.clicked.connect(self._delete_selected_stations)
 
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("文档预设"))
-        toolbar.addWidget(self.station_preset_field)
-        toolbar.addWidget(load_button)
-        toolbar.addSpacing(16)
         toolbar.addWidget(add_button)
         toolbar.addWidget(edit_button)
         toolbar.addWidget(delete_button)
@@ -284,10 +267,6 @@ class GlobalCoveragePage(QWidget):
         self.avoidance_angle_field.setValue(config.interference.angle)
         self.avoidance_angle_field.setEnabled(config.interference.enabled)
         self._select_data(self.satellite_field, config.satellite_group.mode)
-        preset = "all" if len(config.stations) >= 5 else "domestic"
-        if len(config.stations) == 1:
-            preset = "single"
-        self._select_data(self.station_preset_field, preset)
         self._fill_station_table(config.stations)
         self._update_satellite_summary()
 
@@ -375,11 +354,6 @@ class GlobalCoveragePage(QWidget):
         }
         self.set_status(status[run_mode])
         self.run_requested.emit(config, run_mode)
-
-    def _load_station_preset(self) -> None:
-        self._fill_station_table(
-            station_template(str(self.station_preset_field.currentData()))
-        )
 
     def _add_station(self) -> None:
         existing_names = {

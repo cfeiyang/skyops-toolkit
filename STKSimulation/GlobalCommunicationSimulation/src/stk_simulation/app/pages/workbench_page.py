@@ -20,7 +20,6 @@ from stk_simulation.stk.desktop_bridge import invoke
 
 STEPS = (
     ("场景", "calendar-range"),
-    ("卫星与星历", "satellite"),
     ("地面站", "radio-tower"),
     ("角度约束", "scan-line"),
     ("可见性计算", "clock-3"),
@@ -182,12 +181,12 @@ class WorkbenchPage(QWidget):
         column_layout.addWidget(panel)
         column_layout.addStretch(1)
         scroll.setWidget(column)
-        for builder in (self._scene_form, self._satellite_form, self._station_form,
-                        self._constraints_form, self._access_form):
+        for builder in (self._object_form, self._station_form, self._constraints_form, self._access_form):
             self.forms.addWidget(builder())
         outer.addWidget(SideNavigation(STEPS, self.forms))
         outer.addWidget(scroll, 1)
         self.forms.currentChanged.connect(self._refresh_actions)
+        self.object_forms.currentChanged.connect(self._refresh_actions)
         self._refresh_actions()
 
     @staticmethod
@@ -232,8 +231,27 @@ class WorkbenchPage(QWidget):
         if file:
             edit.setText(str(Path(file)))
 
+    def _object_form(self):
+        page, layout = self._form("场景")
+        self.object_type = dropdown(("场景", "scenario"), ("卫星", "satellite"))
+        self._add_fields(layout, fields(("操作对象", self.object_type, 1)))
+        self.object_forms = SectionStack()
+        self.object_forms.addWidget(self._scene_form())
+        self.object_forms.addWidget(self._satellite_form())
+        layout.addWidget(self.object_forms, 1)
+        self.object_type.currentIndexChanged.connect(self.object_forms.setCurrentIndex)
+        return page
+
+    @staticmethod
+    def _object_fields():
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(13)
+        return page, layout
+
     def _scene_form(self):
-        page, layout = self._form("场景设置")
+        page, layout = self._object_fields()
         self.scene_mode = dropdown(("新建场景", "new"), ("打开已有场景", "open"))
         self.scene_name = QLineEdit("GroundPass")
         start = QDateTime.currentDateTimeUtc()
@@ -257,11 +275,11 @@ class WorkbenchPage(QWidget):
         return page
 
     def _satellite_form(self):
-        page, layout = self._form("卫星与星历")
+        page, layout = self._object_fields()
         self.sat_mode = dropdown(("创建卫星", "new"), ("更新卫星", "edit"), ("导出星历", "export"))
         self.sat_name = QLineEdit("Satellite1")
         self.sat_existing = self._selection("satellites")
-        self.source = dropdown(("使用公共卫星", "reference"), ("经典轨道根数", "classical"),
+        self.source = dropdown(("使用右上角卫星设置", "reference"), ("经典轨道根数", "classical"),
                                ("导入星历文件", "ephemeris"), ("两行 TLE", "tle"))
         self._add_fields(layout, fields(("操作", self.sat_mode, 1)))
         self.sat_name_fields = fields(("卫星名", self.sat_name, 2))
@@ -414,8 +432,14 @@ class WorkbenchPage(QWidget):
         self._reference_satellite = profile
         self.reference_source_label.setText(profile.label)
 
+    def _operation_index(self):
+        section = self.forms.currentIndex()
+        if section < 0:
+            return section
+        return self.object_forms.currentIndex() if section == 0 else section + 1
+
     def _refresh_actions(self):
-        index = self.forms.currentIndex()
+        index = self._operation_index()
         if index < 0:
             return
         self.forms.updateGeometry()
@@ -449,7 +473,7 @@ class WorkbenchPage(QWidget):
         return widget.currentText()
 
     def _plan_current(self):
-        page = self.forms.currentIndex()
+        page = self._operation_index()
         if page == 0:
             if self.scene_mode.currentData() == "open":
                 return commands.open_scenario(self.scene_file.text()), "已打开场景。"

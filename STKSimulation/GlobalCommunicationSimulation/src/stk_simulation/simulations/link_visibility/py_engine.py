@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 from skyfield.api import EarthSatellite, Loader, wgs84
+from skyfield.framelib import itrs
 
 from stk_simulation.infrastructure.tle import TLEData
 from stk_simulation.simulations.common import OutputResult, parse_stk_time
@@ -23,6 +24,7 @@ from stk_simulation.simulations.link_visibility.config import (
     LinkStationConfig,
     LinkVisibilityConfig,
     LinkVisibilityResult,
+    OrbitTrack,
     TrackPoint,
 )
 
@@ -211,10 +213,10 @@ def compute_link_visibility_python(
         raise ValueError("结束时间必须晚于开始时间。")
     if (stop_utc - start_utc).total_seconds() > 8 * 86400.0:
         raise ValueError("仿真时段超过 8 天，请缩小时间范围。")
-    span_sec = max((stop_utc - start_utc).total_seconds(), 60.0)
+    span_sec = (stop_utc - start_utc).total_seconds()
     step = float(max(config.coarse_step_sec, 5.0))
     grid = [start_utc + timedelta(seconds=i * step) for i in range(int(span_sec // step) + 1)]
-    if (stop_utc - grid[-1]).total_seconds() > 1.0:
+    if grid[-1] < stop_utc:
         grid.append(stop_utc)
     t_grid = ts.from_datetimes(grid)
 
@@ -232,7 +234,13 @@ def compute_link_visibility_python(
         station_aer[h.station.name] = tuple(aer)
 
     # 星下点轨迹 + 单站建链状态
-    sub = sat.at(t_grid).subpoint()
+    positions = sat.at(t_grid)
+    sub = wgs84.subpoint_of(positions)
+    orbit = OrbitTrack(
+        elapsed_sec=tuple((dt - start_utc).total_seconds() for dt in grid),
+        inertial_km=positions.xyz.km.T,
+        inertial_to_earth=np.moveaxis(itrs.rotation_at(t_grid), -1, 0),
+    )
     vis = [np.asarray(h.visible_at(t_grid), dtype=bool) for h in handles]
     els = [np.asarray(h.altaz(t_grid)[0].degrees) for h in handles]
     track = []
@@ -268,6 +276,7 @@ def compute_link_visibility_python(
         station_windows=station_windows,
         station_totals=station_totals,
         station_aer=station_aer,
+        orbit_track=orbit,
         output=OutputResult(config.paths.result_dir, image_name, config.paths.result_dir / image_name),
         cfg=config,
     )

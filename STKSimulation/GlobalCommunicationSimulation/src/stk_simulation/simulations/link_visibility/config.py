@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Tuple
-from stk_simulation.infrastructure.reference_satellite import ReferenceSatellite
 
+import numpy as np
+from numpy.typing import NDArray
+
+from stk_simulation.infrastructure.reference_satellite import ReferenceSatellite
 from stk_simulation.simulations.common import (
     OutputResult,
     PathsConfig,
@@ -86,6 +89,15 @@ class EngineDiffItem:
     max_el_diff_deg: float
 
 
+@dataclass(frozen=True, eq=False)
+class OrbitTrack:
+    """Times and 3D positions aligned with the ground track."""
+
+    elapsed_sec: tuple[float, ...]
+    inertial_km: NDArray[np.float64]
+    inertial_to_earth: NDArray[np.float64]
+
+
 @dataclass
 class LinkVisibilityResult:
     engine_used: str  # "python" | "stk" | "compare"
@@ -102,6 +114,7 @@ class LinkVisibilityResult:
     station_windows: dict[str, tuple[AccessWindow, ...]] = field(default_factory=dict)
     station_totals: dict[str, float] = field(default_factory=dict)
     station_aer: dict[str, tuple[AERRecord, ...]] = field(default_factory=dict)
+    orbit_track: OrbitTrack | None = None
 
     @property
     def total_duration_sec(self) -> float:

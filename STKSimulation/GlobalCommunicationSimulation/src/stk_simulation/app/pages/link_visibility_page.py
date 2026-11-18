@@ -5,16 +5,17 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 import copy
 import csv
-import json
 from datetime import timedelta
-from pathlib import Path
+from math import isfinite
 
-from PySide6.QtCore import Qt, QPointF, QTimer, Signal
-from PySide6.QtGui import QColor, QPageLayout, QPainter, QPainterPath, QPen, QPolygonF, QTextDocument
+from PySide6.QtCore import QElapsedTimer, QPointF, QSignalBlocker, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QPageLayout, QPainter, QPen, QPixmap, QPolygonF, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDateEdit,
     QFileDialog,
@@ -37,6 +38,9 @@ from PySide6.QtWidgets import (
 )
 
 from stk_simulation.app.icons import action_button, apply_icon
+from stk_simulation.app.widgets.orbit_globe import (
+    OrbitGlobeWidget, SATELLITE_COLOR, SPACE_COLOR, STATION_COLORS, world_rings,
+)
 from stk_simulation.app.widgets.side_navigation import SideNavigation
 from stk_simulation.simulations.common import SatelliteConfig
 from stk_simulation.simulations.link_visibility.config import (
@@ -45,90 +49,29 @@ from stk_simulation.simulations.link_visibility.config import (
     LinkVisibilityResult,
 )
 
-_SAT_COLORS = ("#4da3ff", "#f472b6")
-_SAT_TEXT = ("#a8cfff", "#f9a8d4")
-
-
 class WorldMapWidget(QWidget):
-    """纯 Qt QPainter 自绘世界地图 + 星下轨迹 + 卫星移动动画。"""
+    """星下点地图。底图和完整轨迹只在数据或尺寸变化时重绘。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(440)
-        self._polys = self._load_world()
-        self._track = []
-        self._stations: list[tuple[float, float, str]] = []
-        self._idx = 0.0
-        self._n = 0
-        self._speed = 600
-        self._step_sec = 60.0
-        self._playing = False
+        self._track = ()
+        self._stations = ()
+        self._position = 0.0
+        self._cache_key = None
+        self._background = QPixmap()
 
-        self._timer = QTimer(self)
-        self._timer.setInterval(100)
-        self._timer.timeout.connect(self._tick)
-
-    # ---------------------------------------------------------------- 数据
-    def _load_world(self):
-        path = Path(__file__).resolve().parents[2] / "assets" / "world.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
-        rings: list[list] = []
-        for feature in data.get("features", []):
-            geometry = feature.get("geometry")
-            if not geometry or geometry.get("coordinates") is None:
-                continue
-            self._collect_rings(geometry["coordinates"], rings)
-        return rings
-
-    @staticmethod
-    def _collect_rings(coords, out: list) -> None:
-        if not coords:
-            return
-        # 到达"环"层：coords[0][0] 是数字（即 [lng, lat]）
-        if isinstance(coords[0][0], (int, float)):
-            out.append(coords)
-            return
-        for child in coords:
-            WorldMapWidget._collect_rings(child, out)
-
-    def set_data(self, track, stations, step_sec: float) -> None:
-        self._track = list(track)
-        self._stations = [(st.latitude_deg, st.longitude_deg, st.name) for st in stations]
-        self._step_sec = max(float(step_sec), 5.0)
-        self._n = len(self._track)
-        self._idx = 0.0
-        self._playing = False
+    def set_data(self, track, stations) -> None:
+        self._track = track
+        self._stations = tuple(stations[:2])
+        self._position = 0.0
+        self._cache_key = None
         self.update()
 
-    def set_position(self, idx: float) -> None:
-        self._idx = max(0.0, min(float(idx), max(self._n - 1, 0)))
+    def set_position(self, position: float) -> None:
+        self._position = position
         self.update()
 
-    def play_pause(self) -> None:
-        if self._n == 0:
-            return
-        if self._idx >= self._n - 1:
-            self._idx = 0.0
-        self._playing = not self._playing
-
-    def reset(self) -> None:
-        self._idx = 0.0
-        self._playing = False
-        self.update()
-
-    def set_speed(self, speed: float) -> None:
-        self._speed = max(float(speed), 1.0)
-
-    def _tick(self) -> None:
-        if not self._playing or self._n == 0:
-            return
-        self._idx += (0.1 * self._speed) / self._step_sec
-        if self._idx >= self._n - 1:
-            self._idx = self._n - 1
-            self._playing = False
-        self.update()
-
-    # ---------------------------------------------------------------- 绘制
     def _project(self, lon: float, lat: float) -> QPointF:
         # 锁定 2:1（360°×180°）等距圆柱投影，避免窗口过宽时把地球横向拉扁
         width = float(self.width())
@@ -141,83 +84,71 @@ class WorldMapWidget(QWidget):
         y = offset_y + (90.0 - lat) / 180.0 * map_h
         return QPointF(x, y)
 
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
+    def _make_background(self, scale: float) -> QPixmap:
+        image = QPixmap(round(self.width() * scale), round(self.height() * scale))
+        image.setDevicePixelRatio(scale)
+        image.fill(QColor(SPACE_COLOR))
+        painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#0f172a"))
-
-        # 海岸线多边形
-        painter.setPen(QPen(QColor("#26364f"), 0.5))
-        painter.setBrush(QColor("#0f172a"))
-        for ring in self._polys:
-            polygon = QPolygonF([self._project(p[0], p[1]) for p in ring])
-            painter.drawPolygon(polygon)
-
-        # 星下轨迹（跨 ±180° 切断）
-        segments: list[list[tuple[float, float]]] = []
-        current: list[tuple[float, float]] = []
-        prev_lon = None
-        for pt in self._track:
-            lon, lat = pt.longitude_deg, pt.latitude_deg
-            if prev_lon is not None and abs(lon - prev_lon) > 180:
-                segments.append(current)
-                current = []
-            current.append((lon, lat))
-            prev_lon = lon
-        if current:
-            segments.append(current)
+        painter.setPen(QPen(QColor("#324963"), 0.7))
+        for ring in world_rings():
+            painter.drawPolyline(QPolygonF([self._project(lon, lat) for lon, lat in ring]))
 
         painter.setPen(QPen(QColor(34, 211, 238), 1.6))
-        for seg in segments:
-            polygon = QPolygonF([self._project(lon, lat) for lon, lat in seg])
-            painter.drawPolyline(polygon)
+        segment = []
+        prev_lon = None
+        for point in self._track:
+            lon, lat = point.longitude_deg, point.latitude_deg
+            valid = isfinite(lon) and isfinite(lat)
+            if not valid or (prev_lon is not None and abs(lon - prev_lon) > 180):
+                painter.drawPolyline(QPolygonF(segment))
+                segment.clear()
+            if valid:
+                segment.append(self._project(lon, lat))
+            prev_lon = lon if valid else None
+        painter.drawPolyline(QPolygonF(segment))
 
-        # 地面站
-        for index, (lat, lon, name) in enumerate(self._stations):
-            pos = self._project(lon, lat)
+        for station, color in zip(self._stations, STATION_COLORS):
+            pos = self._project(station.longitude_deg, station.latitude_deg)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(_SAT_COLORS[index % 2]))
+            painter.setBrush(QColor(color))
             painter.drawEllipse(pos, 6, 6)
-            painter.setPen(QPen(QColor(_SAT_TEXT[index % 2])))
-            painter.drawText(QPointF(pos.x() + 9, pos.y() + 4), name)
+            painter.setPen(QColor(color))
+            painter.drawText(pos + QPointF(9, 4), station.name)
+        painter.end()
+        return image
 
-        # 卫星当前位置 + 建链线
-        if self._n > 0:
-            i0 = int(min(self._idx, self._n - 1))
-            i1 = min(self._n - 1, i0 + 1)
-            frac = self._idx - i0
-            a = self._track[i0]
-            b = self._track[i1]
-            dlon = b.longitude_deg - a.longitude_deg
-            if dlon > 180:
-                dlon -= 360
-            if dlon < -180:
-                dlon += 360
-            lon = a.longitude_deg + dlon * frac
-            lat = a.latitude_deg + (b.latitude_deg - a.latitude_deg) * frac
-            sat = self._project(lon, lat)
+    def _draw_satellite(self, painter) -> None:
+        start = int(self._position)
+        a = self._track[start]
+        b = self._track[min(start + 1, len(self._track) - 1)]
+        fraction = self._position - start
+        delta_lon = (b.longitude_deg - a.longitude_deg + 180) % 360 - 180
+        lon = (a.longitude_deg + delta_lon * fraction + 180) % 360 - 180
+        lat = a.latitude_deg + (b.latitude_deg - a.latitude_deg) * fraction
+        if not (isfinite(lon) and isfinite(lat)):
+            return
+        satellite = self._project(lon, lat)
+        for station, linked, color in zip(self._stations, (a.linked1, a.linked2), STATION_COLORS):
+            if linked:
+                painter.setPen(QPen(QColor(color), 2.0))
+                painter.drawLine(self._project(station.longitude_deg, station.latitude_deg), satellite)
 
-            if a.linked1 or a.linked2:
-                for index, (st_lat, st_lon, _name) in enumerate(self._stations):
-                    linked = a.linked1 if index == 0 else a.linked2
-                    if not linked:
-                        continue
-                    ground = self._project(st_lon, st_lat)
-                    color = QColor(77, 163, 255, 220) if index == 0 else QColor(244, 114, 182, 220)
-                    painter.setPen(QPen(color, 2.0))
-                    painter.drawLine(ground, sat)
+        painter.setPen(QPen(QColor("#674c16"), 2))
+        painter.setBrush(QColor(SATELLITE_COLOR))
+        painter.drawEllipse(satellite, 7, 7)
 
-            painter.setPen(QPen(QColor(255, 183, 3), 2))
-            painter.setBrush(QColor(255, 183, 3))
-            painter.drawEllipse(sat, 7, 7)
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(QColor(255, 183, 3, 120), 3))
-            painter.drawEllipse(sat, 13, 13)
-
-            status = "● 通信中" if a.linked else "—"
-            painter.setPen(QPen(QColor("#34d399") if a.linked else QColor("#64748b")))
-            painter.drawText(QPointF(sat.x() + 16, sat.y() - 6), f"卫星 {a.time} {status}")
-
+    def paintEvent(self, _event) -> None:
+        scale = self.devicePixelRatioF()
+        key = (self.width(), self.height(), scale)
+        if key != self._cache_key:
+            self._background = self._make_background(scale)
+            self._cache_key = key
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._background)
+        if self._track:
+            painter.setRenderHint(QPainter.Antialiasing)
+            self._draw_satellite(painter)
         painter.end()
 
 
@@ -235,6 +166,7 @@ def _metric_card(title: str) -> tuple[QFrame, QLabel, QLabel]:
 
 
 def _fill_table(table: QTableWidget, headers: tuple[str, ...], rows) -> None:
+    table.verticalHeader().hide()
     table.setAlternatingRowColors(True)
     table.setShowGrid(False)
     table.setRowCount(len(rows))
@@ -253,6 +185,14 @@ class LinkVisibilityPage(QWidget):
         super().__init__(parent)
         self._config = copy.deepcopy(default_config)
         self._last_result: LinkVisibilityResult | None = None
+        self._sample_times: tuple[float, ...] = ()
+        self._elapsed_sec = 0.0
+        self._play_speed = 600
+        self._clock = QElapsedTimer()
+        self._timer = QTimer(self)
+        self._timer.setInterval(33)
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._timer.timeout.connect(self._advance_track)
         self._build_ui()
 
     # ---------------------------------------------------------------- UI
@@ -334,35 +274,7 @@ class LinkVisibilityPage(QWidget):
         root.addStretch(1)
         self.sections.addWidget(self._scroll(results))
 
-        # 世界地图动画
-        map_card = QGroupBox("星下点轨迹（世界地图）")
-        map_layout = QVBoxLayout(map_card)
-        self.map_widget = WorldMapWidget()
-        map_layout.addWidget(self.map_widget)
-
-        ctrl = QHBoxLayout()
-        self.btn_play = action_button("动画播放", "play")
-        self.btn_play.clicked.connect(self._toggle_play)
-        self.btn_reset = action_button("重置", "rotate-ccw")
-        self.btn_reset.clicked.connect(self.map_widget.reset)
-        self.speed_combo = QComboBox()
-        for value in ("60", "300", "600", "1200", "3600"):
-            self.speed_combo.addItem(f"{value}×", int(value))
-        self.speed_combo.setCurrentIndex(2)
-        self.speed_combo.currentIndexChanged.connect(self._on_speed)
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0, 0)
-        self.slider.sliderMoved.connect(self._on_slider)
-        self.map_status = QLabel("—")
-        self.map_status.setObjectName("statusLabel")
-        ctrl.addWidget(self.btn_play)
-        ctrl.addWidget(self.btn_reset)
-        ctrl.addWidget(QLabel("动画速度"))
-        ctrl.addWidget(self.speed_combo)
-        ctrl.addWidget(self.slider, 1)
-        ctrl.addWidget(self.map_status)
-        map_layout.addLayout(ctrl)
-        self.sections.addWidget(self._scroll(map_card))
+        self.sections.addWidget(self._scroll(self._build_track_tab()))
 
         self.status_label = QLabel("就绪：等待启动建链计算")
         self.status_label.setObjectName("statusLabel")
@@ -377,6 +289,59 @@ class LinkVisibilityPage(QWidget):
             ("轨迹地图", "globe"),
         ), self.sections))
         outer.addWidget(panel, 1)
+
+    def _build_track_tab(self) -> QWidget:
+        map_card = QGroupBox("卫星轨迹")
+        map_layout = QVBoxLayout(map_card)
+        self.map_widget = WorldMapWidget()
+        self.globe_widget = OrbitGlobeWidget()
+        self.track_views = QStackedWidget()
+        self.track_views.addWidget(self.map_widget)
+        self.track_views.addWidget(self.globe_widget)
+        modes = QHBoxLayout()
+        group = QButtonGroup(map_card)
+        for index, (caption, artwork) in enumerate((("二维地图", "globe"), ("三维轨道", "orbit"))):
+            button = action_button(caption, artwork)
+            button.setCheckable(True)
+            group.addButton(button, index)
+            modes.addWidget(button)
+        group.button(0).setChecked(True)
+        group.idClicked.connect(self.track_views.setCurrentIndex)
+        modes.addStretch(1)
+        hint = QLabel("拖动旋转 · 滚轮缩放")
+        hint.setObjectName("hintLabel")
+        hint.hide()
+        self.track_views.currentChanged.connect(lambda index: hint.setVisible(index == 1))
+        modes.addWidget(hint)
+        map_layout.addLayout(modes)
+        map_layout.addWidget(self.track_views, 1)
+
+        ctrl = QHBoxLayout()
+        self.btn_play = action_button("动画播放", "play")
+        self.btn_play.clicked.connect(self._toggle_play)
+        self.btn_reset = action_button("重置", "rotate-ccw")
+        self.btn_reset.clicked.connect(self._reset_track)
+        self.speed_combo = QComboBox()
+        for value in ("60", "300", "600", "1200", "3600"):
+            self.speed_combo.addItem(f"{value}×", int(value))
+        self.speed_combo.setCurrentIndex(2)
+        self.speed_combo.currentIndexChanged.connect(self._on_speed)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(0, 0)
+        self.slider.valueChanged.connect(self._on_slider)
+        self.map_status = QLabel("完成计算后可播放")
+        self.map_status.setObjectName("statusLabel")
+        ctrl.addWidget(self.btn_play)
+        ctrl.addWidget(self.btn_reset)
+        ctrl.addWidget(QLabel("动画速度"))
+        ctrl.addWidget(self.speed_combo)
+        ctrl.addWidget(self.slider, 1)
+        ctrl.addWidget(self.map_status)
+        map_layout.addLayout(ctrl)
+        self._update_play_button()
+        self.btn_reset.setEnabled(False)
+        self.slider.setEnabled(False)
+        return map_card
 
     @staticmethod
     def _scroll(content: QWidget) -> QScrollArea:
@@ -504,26 +469,82 @@ class LinkVisibilityPage(QWidget):
         self.run_requested.emit(cfg, "normal")
 
     def _toggle_play(self) -> None:
-        self.map_widget.play_pause()
-        if self.map_widget._playing:
-            self.btn_play.setText("暂停")
-            apply_icon(self.btn_play, "pause")
+        if self._timer.isActive():
+            self._advance_track()
+            self._timer.stop()
         else:
-            self.btn_play.setText("继续动画" if self.map_widget._idx > 0 else "动画播放")
-            apply_icon(self.btn_play, "play")
+            if self._elapsed_sec >= self._sample_times[-1]:
+                self._seek_track(0.0)
+            self._clock.start()
+            self._timer.start()
+        self._update_play_button()
+
+    def _advance_track(self) -> None:
+        elapsed = self._clock.restart() / 1000.0
+        self._seek_track(self._elapsed_sec + elapsed * self._play_speed)
+        if self._elapsed_sec >= self._sample_times[-1]:
+            self._timer.stop()
+            self._update_play_button()
+
+    def _reset_track(self) -> None:
+        self._timer.stop()
+        self._seek_track(0.0)
+        self._update_play_button()
 
     def _on_slider(self, value: int) -> None:
-        self.map_widget.set_position(value)
-        self._sync_status()
+        self._seek_track(self._sample_times[value])
+        if self._timer.isActive():
+            self._clock.restart()
+        self._update_play_button()
 
     def _on_speed(self) -> None:
-        self.map_widget.set_speed(self.speed_combo.currentData())
+        if self._timer.isActive():
+            self._advance_track()
+        self._play_speed = self.speed_combo.currentData()
 
-    def _sync_status(self) -> None:
-        if self._last_result and self._last_result.ground_track:
-            idx = int(min(self.map_widget._idx, len(self._last_result.ground_track) - 1))
-            pt = self._last_result.ground_track[idx]
-            self.map_status.setText(f"{pt.time}　{'● 通信中' if pt.linked else '—'}")
+    def _update_play_button(self) -> None:
+        playing = self._timer.isActive()
+        self.btn_play.setEnabled(len(self._sample_times) > 1)
+        text = "动画播放"
+        if playing:
+            text = "暂停"
+        elif self._elapsed_sec > 0:
+            text = "重新播放" if self._elapsed_sec >= self._sample_times[-1] else "继续播放"
+        self.btn_play.setText(text)
+        apply_icon(self.btn_play, "pause" if playing else "play")
+
+    def _seek_track(self, elapsed_sec: float) -> None:
+        if not self._sample_times:
+            self.map_status.setText("暂无轨迹数据")
+            return
+        self._elapsed_sec = min(elapsed_sec, self._sample_times[-1])
+        index = bisect_right(self._sample_times, self._elapsed_sec) - 1
+        position = float(index)
+        if index + 1 < len(self._sample_times):
+            start, end = self._sample_times[index:index + 2]
+            position += (self._elapsed_sec - start) / (end - start)
+        self.map_widget.set_position(position)
+        self.globe_widget.set_position(position)
+        with QSignalBlocker(self.slider):
+            self.slider.setValue(index)
+        pt = self._last_result.ground_track[index]
+        self.map_status.setText(f"{pt.time}　{'通信中' if pt.linked else '未建链'}")
+
+    def _set_track(self, result: LinkVisibilityResult) -> None:
+        self._timer.stop()
+        self._elapsed_sec = 0.0
+        orbit = result.orbit_track
+        self._sample_times = orbit.elapsed_sec if orbit else tuple(
+            index * max(5.0, result.cfg.coarse_step_sec) for index in range(len(result.ground_track))
+        )
+        self.map_widget.set_data(result.ground_track, result.cfg.stations)
+        self.globe_widget.set_data(orbit, result.cfg.stations, result.satellite_name)
+        with QSignalBlocker(self.slider):
+            self.slider.setRange(0, max(len(self._sample_times) - 1, 0))
+        self.slider.setEnabled(len(self._sample_times) > 1)
+        self.btn_reset.setEnabled(len(self._sample_times) > 1)
+        self._seek_track(0.0)
+        self._update_play_button()
 
     def set_busy(self, busy: bool) -> None:
         self.run_btn.setEnabled(not busy)
@@ -553,10 +574,7 @@ class LinkVisibilityPage(QWidget):
         self._fill_station_table(self.p2_table, p2)
 
         # 地图动画
-        self.map_widget.set_data(result.ground_track, result.cfg.stations, result.cfg.coarse_step_sec)
-        self.slider.setRange(0, max(len(result.ground_track) - 1, 0))
-        self.btn_play.setText("动画播放")
-        apply_icon(self.btn_play, "play")
+        self._set_track(result)
 
         self.set_status(f"计算完成：两地 {len(result.windows)} 个窗口，累计 {result.total_duration_sec / 3600.0:.2f} h")
 
