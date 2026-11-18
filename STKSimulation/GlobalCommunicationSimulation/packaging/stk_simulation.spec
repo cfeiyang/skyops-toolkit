@@ -24,6 +24,7 @@ for pkg in ("mpl_toolkits.basemap_data", "skyfield", "sgp4"):
         pass
 
 datas.append((str(app_icon), "stk_simulation/assets"))
+datas.append((str(app_icon.with_name("world.json")), "stk_simulation/assets"))
 
 a = Analysis(
     [str(source_root / "stk_simulation" / "__main__.py")],
@@ -37,6 +38,10 @@ a = Analysis(
     excludes=["tkinter"],
     noarchive=False,
 )
+# Qt 使用 Windows ICU 的入口，避免打包 Conda 环境中的同名库。
+a.binaries = [entry for entry in a.binaries
+              if Path(entry[0]).name.lower() != "icuuc.dll"
+              and not Path(entry[0]).name.lower().startswith("icudt")]
 pyz = PYZ(a.pure)
 
 exe = EXE(

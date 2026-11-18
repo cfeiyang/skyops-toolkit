@@ -2,8 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
-# 统一使用 conda 的 skyops 环境（含三个工具全部依赖），找不到再退回系统 python
-$py = "D:\Software\Anaconda3\envs\skyops\python.exe"
+# 从工具箱调用时使用它选定的环境，直接调用时兼容已有安装。
+$py = $env:SKYOPS_PYTHON
+if (-not $py) { $py = "D:\Software\Anaconda3\envs\skyops\python.exe" }
 if (-not (Test-Path $py)) { $py = "python" }
 
 function Test-PythonModule([string]$name) {

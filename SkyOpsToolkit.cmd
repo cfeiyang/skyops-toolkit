@@ -1,57 +1,102 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
-set "PY=D:\Software\Anaconda3\envs\skyops\python.exe"
-set "PYW=D:\Software\Anaconda3\envs\skyops\pythonw.exe"
-if not exist "%PY%"  set "PY=python"
-if not exist "%PYW%" set "PYW=pythonw"
+chcp 936 >nul
+set "SKYOPS_PYTHON="
+if defined CONDA_PREFIX (
+    for %%D in ("%CONDA_PREFIX%") do if /i "%%~nxD"=="SkyOps" call :find_python "%%~fD"
+)
+if not defined SKYOPS_PYTHON (
+    for /f "delims=" %%P in ('where.exe python.exe 2^>nul') do call :find_python "%%~dpPenvs\SkyOps"
+)
+if not defined SKYOPS_PYTHON call :find_python "D:\Anaconda3\envs\SkyOps"
+if not defined SKYOPS_PYTHON call :find_python "D:\Software\Anaconda3\envs\SkyOps"
 
 :MENU
+title SkyOps 工具箱
 cls
 echo ==================================================
-echo    SkyOps 工具箱 —— 启动管理
+echo                  SkyOps 工具箱
 echo ==================================================
-echo    [1] MPAM 月度项目分配管理
-echo    [2] SatLog Web 原版（浏览器 8501）
-echo    [3] SkyOps 桌面仿真（全球覆盖 + 建链）
-echo    [4] 打包 SkyOpsSim.exe
+echo  打开工具
+echo    [1] 月度项目分配
+echo    [2] 卫星试验记录
+echo    [3] 全球通信仿真
+echo.
+echo  打包发布
+echo    [4] 打包仿真桌面版
+echo    [5] 打包月度项目分配
+echo.
 echo    [0] 退出
 echo ==================================================
-set /p choice=请输入选项 (1/2/3/4/0): 
+:READ_OPTION
+set "SKYOPS_SELECTION="
+set /p "SKYOPS_SELECTION=请输入编号 [1/2/3/4/5/0] 后按回车："
+if not defined SKYOPS_SELECTION goto READ_OPTION
+call :parse_selection
+if errorlevel 6 goto INVALID_OPTION
+if errorlevel 5 goto BUILD_MPAM
+if errorlevel 4 goto BUILD_SIM
+if errorlevel 3 goto SIM
+if errorlevel 2 goto SAT
+if errorlevel 1 goto MPAM
+exit /b 0
 
-if "%choice%"=="1" goto MPAM
-if "%choice%"=="2" goto SAT
-if "%choice%"=="3" goto SKY
-if "%choice%"=="4" goto BUILD
-if "%choice%"=="0" exit /b 0
-echo 无效选项，请重新输入。
-timeout /t 1 >nul
-goto MENU
+:INVALID_OPTION
+echo 编号无效，请重新输入。
+goto READ_OPTION
 
 :MPAM
-start "" "%PYW%" "MPAM\main.py"
-echo MPAM 已启动（登录 root / 123456）。
-timeout /t 1 >nul
+call "%~dp0MPAM\MPAM.cmd"
 goto MENU
 
 :SAT
-echo 正在启动 SatLog Web ...
-powershell -NoProfile -ExecutionPolicy Bypass -File "SatLog\scripts\start_skyops.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0SatLog\scripts\start_skyops.ps1"
 goto MENU
 
-:SKY
-echo 正在启动 SkyOps 桌面仿真 ...
+:SIM
+call :require_python
+if errorlevel 1 goto MENU
+setlocal
 set "PYTHONPATH=%~dp0STKSimulation\GlobalCommunicationSimulation\src"
-"%PY%" -m stk_simulation
-if errorlevel 1 (
-    echo.
-    echo 启动失败。请确认 skyops 环境已安装依赖。
-    pause
-)
+"%SKYOPS_PYTHON%" -s -B -X utf8 -m stk_simulation
+if errorlevel 1 pause
+endlocal
 goto MENU
 
-:BUILD
-echo 正在打包 SkyOpsSim.exe ...
-powershell -NoProfile -ExecutionPolicy Bypass -File "STKSimulation\GlobalCommunicationSimulation\packaging\build.ps1"
-timeout /t 1 >nul
+:BUILD_SIM
+call :require_python
+if errorlevel 1 goto MENU
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0STKSimulation\GlobalCommunicationSimulation\packaging\build.ps1"
+pause
 goto MENU
+
+:BUILD_MPAM
+call :require_python
+if errorlevel 1 goto MENU
+"%SKYOPS_PYTHON%" -s -B -X utf8 "%~dp0MPAM\packaging\build.py"
+if errorlevel 1 echo 打包失败，请查看上方输出。
+pause
+goto MENU
+
+:require_python
+if defined SKYOPS_PYTHON exit /b 0
+echo 未找到 SkyOps 环境。请激活 SkyOps 后重新打开本菜单。
+pause
+exit /b 1
+
+:find_python
+if defined SKYOPS_PYTHON exit /b
+if exist "%~1\python.exe" set "SKYOPS_PYTHON=%~1\python.exe"
+exit /b
+
+:parse_selection
+setlocal EnableDelayedExpansion
+for %%N in (0 1 2 3 4 5) do (
+    if "!SKYOPS_SELECTION!"=="%%N" (
+        endlocal
+        exit /b %%N
+    )
+)
+endlocal
+exit /b 6

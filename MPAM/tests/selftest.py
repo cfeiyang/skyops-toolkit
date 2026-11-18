@@ -1,6 +1,6 @@
 """无界面自检：只验证 Excel 读写与判重规则，不弹窗口。
 
-    python selftest.py
+    python MPAM/tests/selftest.py
 
 在临时目录里跑，不会碰 data/ 下的模拟表。
 规则：同一人、同一月、同一个项目号只允许一次；不同项目号可继续添加。
@@ -12,11 +12,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[1]
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
-from excel_store import (  # noqa: E402
+from app.excel_store import (  # noqa: E402
     AssignError,
     ExcelStore,
     join_projects,
@@ -27,7 +27,7 @@ from excel_store import (  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.utils import get_column_letter  # noqa: E402
 
-from mock_data import ensure_mock_workbook  # noqa: E402
+from app.mock_data import ensure_mock_workbook  # noqa: E402
 
 failures: list[str] = []
 
@@ -39,7 +39,11 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 def main() -> int:
-    workdir = Path(tempfile.mkdtemp(prefix="mpam_"))
+    with tempfile.TemporaryDirectory(prefix="mpam_") as directory:
+        return run_checks(Path(directory))
+
+
+def run_checks(workdir: Path) -> int:
     book = ensure_mock_workbook(workdir / "月度项目分配-模拟.xlsx")
     store = ExcelStore(book).load()
 

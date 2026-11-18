@@ -18,6 +18,7 @@ function Test-SkyOpsPython([string]$candidate) {
 }
 
 $pythonCandidates = @(
+    $env:SKYOPS_PYTHON,
     "D:\Software\Anaconda3\envs\skyops\python.exe",
     "D:\Software\Anaconda3\envs\satlog\python.exe",
     $(if ($env:CONDA_PREFIX) { Join-Path $env:CONDA_PREFIX "python.exe" }),

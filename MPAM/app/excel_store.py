@@ -1,16 +1,14 @@
-"""Excel 读写层：分配汇总表（人员 × 月份）+ 分配明细表（只追加）。
+"""Excel 工作簿适配层：读取来源表和格式，并按本地 SQLite 数据导出副本。
 
 设计要点
 --------
-- Excel 就是唯一数据源，不引入数据库（单人录入，没有并发）。
+- 应用运行数据保存在 SQLite；导入的原始 Excel 用作初始数据和导出模板。
 - 判重规则：同一人员、同一月份、同一个项目号只允许一条记录。
   同一个人在同一个月可以分配多个**不同**的项目号，只有重复的项目号才被拦截。
 - 支持「修改」：把手误的项目号改成另一个，明细表记一条「修改」（含原项目号）。
 - 一个单元格可存放多个项目号，用「、」分隔（如 12345、67890）。
 - 每次写入前自动备份；保存走「临时文件 + 原子替换」。
-- 保存时自动做两件事：
-  1. 高亮 —— 同一个月里出现多次的项目号，所在格子标黄；
-  2. 自适应列宽 —— 按内容（中文算 2 个字符）自动调整人员列和各月份列宽度。
+- 导出使用临时文件再生成副本，不覆盖原 Excel。
 
 表结构约定（与真实表格一致）
 --------------------------
@@ -25,6 +23,8 @@ import os
 import re
 import shutil
 import unicodedata
+import colorsys
+import xml.etree.ElementTree as ET
 from collections import Counter
 from copy import copy as _copy
 from datetime import date, datetime
@@ -33,6 +33,7 @@ from typing import Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
+from openpyxl.styles.colors import COLOR_INDEX
 from openpyxl.utils import get_column_letter
 
 SHEET_SUMMARY = "分配汇总"
@@ -48,6 +49,7 @@ _SPLIT_RE = re.compile(r"[、/,，;；\n]+")
 
 # 「2026年11月」「2026-11」「2026/11」「2026.11」等写法统一识别
 _MONTH_RE = re.compile(r"(\d{4})\s*(?:年|[-/._])\s*(\d{1,2})")
+MONTH_NUMBER_FORMAT = 'yyyy"年"m"月";@'
 
 # 同月重复项目号的高亮色（浅黄）
 HIGHLIGHT_FILL = PatternFill("solid", fgColor="FFF3CD")
@@ -127,12 +129,14 @@ class ExcelStore:
         self.duplicate_people: List[str] = []
         self.last_saved: Optional[str] = None
         self._header_row: int = 1
+        self._theme_cache: Optional[List[str]] = None
 
     # ------------------------------------------------------------------ 载入
-    def load(self) -> "ExcelStore":
-        if not self.path.is_file():
+    def load(self, source=None) -> "ExcelStore":
+        if source is None and not self.path.is_file():
             raise AssignError(f"找不到 Excel 文件：{self.path}")
-        self._wb = load_workbook(self.path)
+        self._theme_cache = None
+        self._wb = load_workbook(self.path if source is None else source)
         if not self._wb.sheetnames:
             raise AssignError("工作簿里没有任何工作表。")
         self._summary = self._pick_sheet()
@@ -253,11 +257,108 @@ class ExcelStore:
         return self._assigned_at.get((key, person), "")
 
     def who_has(self, key: MonthKey, project_id: str) -> List[str]:
-        """本月里已经占用了该项目号的人员（用于「同号不同人」的软提示）。"""
+        """查询本月分配了该项目号的人员。"""
         target = normalize_project_id(project_id)
         if not target:
             return []
         return [name for name in self._rows if target in self.projects_of(key, name)]
+
+    def project_colors(self) -> Dict[str, str]:
+        """从 Excel 条件格式提取项目号到填充色的映射，返回 #RRGGBB。"""
+        if self._wb is None:
+            return {}
+        theme = self._theme_colors()
+        colors: Dict[str, str] = {}
+        for worksheet in self._wb.worksheets:
+            for conditional in worksheet.conditional_formatting:
+                for rule in worksheet.conditional_formatting[conditional]:
+                    if rule.type != "cellIs" or rule.operator != "equal" or not rule.formula or not rule.dxf:
+                        continue
+                    project = normalize_project_id(str(rule.formula[0]).strip().strip('"'))
+                    fill = rule.dxf.fill
+                    if not project or fill is None:
+                        continue
+                    color = self._fill_color(fill, theme)
+                    if color:
+                        colors.setdefault(project, color)
+        if self._summary is not None:
+            for key, column in self._columns.items():
+                for person, row in self._rows.items():
+                    cell = self._summary.cell(row=row, column=column)
+                    color = self.cell_fill_color(cell)
+                    if not color or color.upper() == "#FFF3CD":
+                        continue
+                    for project in split_projects(cell.value):
+                        colors.setdefault(project, color)
+        return colors
+
+    @property
+    def workbook(self):
+        return self._wb
+
+    def cell_fill_color(self, cell) -> Optional[str]:
+        """读取单元格直接填充色，支持 RGB、索引色和主题色。"""
+        return self._fill_color(cell.fill, self._theme_colors())
+
+    def _theme_colors(self) -> List[str]:
+        if self._theme_cache is not None:
+            return self._theme_cache
+        if not self._wb or not self._wb.loaded_theme:
+            self._theme_cache = []
+            return self._theme_cache
+        namespace = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        try:
+            root = ET.fromstring(self._wb.loaded_theme)
+            scheme = root.find(f".//{namespace}clrScheme")
+        except ET.ParseError:
+            self._theme_cache = []
+            return self._theme_cache
+        if scheme is None:
+            self._theme_cache = []
+            return self._theme_cache
+        by_name = {}
+        for element in scheme:
+            if not len(element):
+                continue
+            color_element = element[0]
+            by_name[element.tag.rsplit("}", 1)[-1]] = (
+                color_element.attrib.get("val") or color_element.attrib.get("lastClr")
+            )
+        names = ("lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink")
+        self._theme_cache = [by_name.get(name, "") for name in names]
+        return self._theme_cache
+
+    @classmethod
+    def _color_hex(cls, color, theme: List[str]) -> Optional[str]:
+        if color is None:
+            return None
+        raw = None
+        if color.type == "rgb" and isinstance(color.rgb, str):
+            raw = color.rgb[-6:]
+        elif color.type == "indexed" and isinstance(color.indexed, int) and color.indexed < len(COLOR_INDEX):
+            raw = COLOR_INDEX[color.indexed][-6:]
+        elif color.type == "theme" and isinstance(color.theme, int) and color.theme < len(theme):
+            raw = theme[color.theme]
+        if not raw or len(raw) != 6 or raw.upper() == "000000":
+            return None
+        try:
+            red, green, blue = (int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        except ValueError:
+            return None
+        if color.type in ("theme", "indexed") and color.tint:
+            hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+            tint = color.tint
+            lightness = lightness * (1 + tint) if tint < 0 else lightness * (1 - tint) + tint
+            red, green, blue = colorsys.hls_to_rgb(hue, max(0, min(1, lightness)), saturation)
+        return "#" + "".join(f"{round(value * 255):02X}" for value in (red, green, blue))
+
+    @classmethod
+    def _fill_color(cls, fill, theme: List[str]) -> Optional[str]:
+        for color in (fill.fgColor, fill.bgColor):
+            value = cls._color_hex(color, theme)
+            if value:
+                return value
+        return None
 
     def lookup(self, project_id: str) -> List[Tuple[MonthKey, str, str]]:
         """按项目号反查：返回 [(月份, 人员, 项目号)]。"""
@@ -314,6 +415,9 @@ class ExcelStore:
                     found.add(project)
         return sorted(found)
 
+    def registered_projects(self) -> List[str]:
+        return list(self._projects)
+
     def search_people(self, text: str) -> List[Tuple[MonthKey, str, str, str]]:
         """按人员模糊检索：姓名里包含该文本的所有人，全部月份的记录。"""
         target = normalize_name(text)
@@ -335,11 +439,10 @@ class ExcelStore:
             return key
 
         ordered = sorted(self._columns)
-        insert_at = 2  # 月份列从第 2 列开始
-        for existing in ordered:
-            if existing > key:
-                break
-            insert_at += 1
+        insert_at = next(
+            (self._columns[existing] for existing in ordered if existing > key),
+            max(self._columns.values(), default=1) + 1,
+        )
 
         worksheet = self._summary
 
@@ -413,13 +516,13 @@ class ExcelStore:
         if len(project) > 40:
             raise AssignError("项目号太长（超过 40 个字符）。")
 
-        if key in self._columns and project in self.projects_of(key, person):
+        existing = self.projects_of(key, person)
+        if existing:
             raise AssignError(
-                f"{person} · {month_label(key)} 已分配过项目号「{project}」，不能重复分配。"
+                f"{person} · {month_label(key)} 已有项目号「{existing[0]}」，每人每月只能分配一个。"
             )
 
         self.ensure_month_column(key)
-        existing = self.projects_of(key, person)
         new_list = existing + [project]
 
         self._backup()
@@ -462,6 +565,8 @@ class ExcelStore:
         existing = self.projects_of(key, person)
         if old not in existing:
             raise AssignError(f"{person} · {month_label(key)} 没有项目号「{old}」，无法修改。")
+        if len(existing) > 1:
+            raise AssignError("该人员本月已有多个项目号，请先在软件中整理为一个。")
         if new in existing and new != old:
             raise AssignError(f"{person} · {month_label(key)} 已分配过「{new}」，不能重复。")
         if new == old:
@@ -572,8 +677,9 @@ class ExcelStore:
 
     def _fill_person_row(self, row: int, person: str) -> None:
         """写姓名；若是新追加的行，复制上一行的样式与行高。"""
+        is_new_row = row > self._summary.max_row
         cell = self._summary.cell(row=row, column=1)
-        if row > self._summary.max_row:
+        if is_new_row:
             source_row = row - 1
             if source_row > self._header_row:
                 self._clone_style(self._summary.cell(row=source_row, column=1), cell)
@@ -611,6 +717,52 @@ class ExcelStore:
         if self._detail is None or row < 2 or row > self._detail.max_row:
             return
         self._detail.delete_rows(row, 1)
+
+    def history_rows(self):
+        """读取旧工作簿已留存的分配明细。"""
+        if self._detail is None:
+            return
+        operator_column = next(
+            (index for index, cell in enumerate(self._detail[1]) if cell.value == "操作人"), None,
+        )
+        for values in self._detail.iter_rows(min_row=2, min_col=1, values_only=True):
+            key = parse_month_key(values[0])
+            if key is None or len(values) < 6 or not values[1] or not values[3]:
+                continue
+            _, person, project, action, previous, when = values[:6]
+            operator = values[operator_column] if operator_column is not None else None
+            yield key, normalize_name(person), str(action), normalize_project_id(previous), normalize_project_id(project), str(when or ""), str(operator or "")
+
+    def write_export(self, target, months, people, projects_of) -> None:
+        """在模板副本上应用当前分配，并输出 Excel。"""
+        for key in months:
+            self.ensure_month_column(key)
+        for key, column in self._columns.items():
+            header = self._summary.cell(row=self._header_row, column=column)
+            value = header.value
+            if isinstance(value, date):
+                display = header.number_format.partition(";")[0].replace('"', "").replace("\\", "")
+                if display.casefold() != "yyyy年m月":
+                    header.number_format = MONTH_NUMBER_FORMAT
+            elif header.data_type == "s" and _MONTH_RE.fullmatch(value.strip().removesuffix("月").strip()):
+                label = month_label(key)
+                if value != label:
+                    header.value = label
+        for person in people:
+            if person not in self._rows:
+                row = self._next_empty_person_row()
+                self._fill_person_row(row, person)
+                self._summary.cell(row=row, column=1).data_type = "s"
+                self._rows[person] = row
+            for key in months:
+                projects = projects_of(key, person)
+                if projects == self.projects_of(key, person):
+                    continue
+                cell = self._summary.cell(row=self._rows[person], column=self._columns[key])
+                cell.value = join_projects(projects) if projects else None
+                if projects:
+                    cell.data_type = "s"
+        self._wb.save(target)
 
     # ------------------------------------------------------------------ 高亮
     @staticmethod

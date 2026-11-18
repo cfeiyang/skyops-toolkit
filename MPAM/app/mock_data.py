@@ -13,7 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from excel_store import (
+from .excel_store import (
     DETAIL_HEADER,
     SHEET_DETAIL,
     SHEET_SUMMARY,
