@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow,
+    QButtonGroup, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from stk_simulation.app.dialogs.satellite_settings import (
+    SatelliteSettingsDialog, load_reference_satellite, save_reference_satellite,
+)
 from stk_simulation.app.icons import action_button
 from stk_simulation.app.pages.global_coverage_page import GlobalCoveragePage
 from stk_simulation.app.pages.link_visibility_page import LinkVisibilityPage
@@ -58,6 +61,10 @@ class MainWindow(QMainWindow):
         self.header_controls.addWidget(self.workbench_page.connection_controls)
         self.stack.currentChanged.connect(self._show_header_controls)
         header_layout.addWidget(self.header_controls)
+        self.satellite_settings = action_button("卫星设置", "orbit")
+        self.satellite_settings.clicked.connect(self._edit_satellite)
+        header_layout.addWidget(self.satellite_settings)
+        self._set_reference_satellite(load_reference_satellite())
 
         self.coverage_page.run_requested.connect(
             lambda cfg, mode: self._start(cfg, mode, "global_coverage")
@@ -82,6 +89,21 @@ class MainWindow(QMainWindow):
         self.controller.status_changed.connect(self._on_status_changed)
         self.workbench_page.busy_changed.connect(self._refresh_task_controls)
         self._on_engine_changed()
+
+    def _set_reference_satellite(self, profile) -> None:
+        self._reference_satellite = profile
+        self.coverage_page.set_reference_satellite(profile)
+        self.link_page.set_reference_satellite(profile)
+        self.workbench_page.set_reference_satellite(profile)
+        self.satellite_settings.setText(f"卫星设置 · {profile.name}")
+        source = "本地 TLE" if profile.tle_file else "TLE 在线更新"
+        self.satellite_settings.setToolTip(f"{profile.label}\n{source}")
+
+    def _edit_satellite(self) -> None:
+        dialog = SatelliteSettingsDialog(self._reference_satellite, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._set_reference_satellite(dialog.profile)
+            save_reference_satellite(dialog.profile)
 
     def _engine_controls(self) -> QWidget:
         widget = QWidget()
@@ -144,6 +166,7 @@ class MainWindow(QMainWindow):
         busy = self.controller.is_busy or self.workbench_page.is_busy
         self.engine_combo.setEnabled(not busy)
         self.stk_mode.setEnabled(not busy)
+        self.satellite_settings.setEnabled(not busy)
         self.coverage_page.set_busy(busy)
         self.link_page.set_busy(busy)
 

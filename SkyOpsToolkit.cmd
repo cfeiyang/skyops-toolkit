@@ -15,20 +15,27 @@ if not defined SKYOPS_PYTHON call :find_python "D:\Software\Anaconda3\envs\SkyOp
 :MENU
 title SkyOps 工具箱
 cls
-echo ==================================================
-echo                  SkyOps 工具箱
-echo ==================================================
-echo  打开工具
-echo    [1] 月度项目分配
-echo    [2] 卫星试验记录
-echo    [3] 全球通信仿真
+color 0F
 echo.
-echo  打包发布
-echo    [4] 打包仿真桌面版
-echo    [5] 打包月度项目分配
+echo   ############################################################
+echo                   S K Y O P S   /   工具箱
+echo   ############################################################
 echo.
-echo    [0] 退出
-echo ==================================================
+echo   #### 打开工具 ####
+echo.
+echo   ## [1] ##   月度项目分配
+echo   ## [2] ##   卫星试验记录
+echo   ## [3] ##   SkyOps 仿真桌面
+echo               全球覆盖 / 建链可见性 / STK 工作台
+echo.
+echo   #### 打包发布 ####
+echo.
+echo   ## [4] ##   打包 SkyOps 仿真桌面版
+echo   ## [5] ##   打包月度项目分配
+echo.
+echo   ## [0] ##   退出
+echo.
+echo   ############################################################
 :READ_OPTION
 set "SKYOPS_SELECTION="
 set /p "SKYOPS_SELECTION=请输入编号 [1/2/3/4/5/0] 后按回车："

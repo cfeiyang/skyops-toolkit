@@ -5,7 +5,7 @@ QWidget {
 QMainWindow, #appRoot, QScrollArea {
     background: #eef3f8;
 }
-QFrame#topBar, QFrame#workbenchPanel {
+QFrame#topBar, QFrame#workbenchPanel, QFrame#toolPanel {
     background: #ffffff;
     border: 1px solid #d7e3ef;
     border-radius: 10px;
@@ -181,6 +181,7 @@ QFrame#workbenchFooter {
     border-bottom-right-radius: 10px;
 }
 QScrollArea { border: none; }
+QScrollArea#toolScroll, QWidget#toolScrollContent { background: #ffffff; }
 QScrollArea#workbenchScroll, QScrollArea#workbenchScroll > QWidget, QWidget#workbenchBody {
     background: #eef3f8;
 }

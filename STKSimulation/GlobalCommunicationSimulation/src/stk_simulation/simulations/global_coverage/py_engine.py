@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from sgp4.api import Satrec, WGS72, jday
 
-from stk_simulation.infrastructure.tle import TLEData, load_latest_tle
+from stk_simulation.infrastructure.tle import TLEData
 from stk_simulation.simulations.common import OutputResult, parse_stk_time
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.presets import derived_satellite_elements
@@ -79,17 +79,6 @@ def _ecef_to_latlon(r_ecef: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return lat, lon
 
 
-def _build_satrec_from_tle_file(tle_path) -> Satrec:
-    lines = [
-        line.strip()
-        for line in tle_path.read_text(encoding="ascii").splitlines()
-        if line.strip()
-    ]
-    l1 = next(line for line in lines if line.startswith("1 "))
-    l2 = next(line for line in lines if line.startswith("2 "))
-    return Satrec.twoline2rv(l1, l2, WGS72)
-
-
 def _build_satrec_from_elements(elem, ref_sat: Satrec) -> Satrec:
     """利用参考星的阻尼项与轨道根数构造派生卫星的 SGP4 算子。
 
@@ -147,11 +136,7 @@ def compute_global_coverage_python(
     """纯 Python 向量化计算全球通信覆盖时长，输出与 STK 完全同构的 GlobalCoverageResult。"""
     if progress:
         progress("[Python 引擎] 正在加载 TLE 轨道根数...")
-    tle = tle or load_latest_tle(
-        config.satellite.tle_url,
-        config.paths.data_dir,
-        config.satellite.ssc,
-    )
+    tle = tle or config.satellite.load_tle(config.paths.data_dir)
 
     start_dt = parse_stk_time(config.scenario.start_time)
     stop_dt = parse_stk_time(config.scenario.stop_time)
@@ -171,7 +156,7 @@ def compute_global_coverage_python(
     jd_full = jd_arr + fr_arr
 
     # 1. 构建卫星列表并传播轨迹
-    ref_sat = _build_satrec_from_tle_file(tle.path)
+    ref_sat = Satrec.twoline2rv(tle.line1, tle.line2, WGS72)
     sat_models = [(config.satellite.name, ref_sat)]
     if config.satellite_group.mode != "single":
         for elem in derived_satellite_elements(tle, step_sec):

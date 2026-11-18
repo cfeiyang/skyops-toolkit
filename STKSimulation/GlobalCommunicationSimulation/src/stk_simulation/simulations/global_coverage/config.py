@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from stk_simulation.infrastructure.reference_satellite import ReferenceSatellite
 
 from stk_simulation.simulations.common import (
     NamedConfig,
@@ -93,15 +94,7 @@ def config_global_coverage() -> GlobalCoverageConfig:
             start_time=start_time,
             stop_time=stop_time,
         ),
-        satellite=SatelliteConfig(
-            name="TN01A",
-            ssc=59705,
-            step=60,
-            tle_url=(
-                "https://celestrak.org/NORAD/elements/"
-                "gp.php?CATNR=59705&FORMAT=TLE"
-            ),
-        ),
+        satellite=SatelliteConfig.from_reference(ReferenceSatellite(), step=60),
         satellite_group=SatelliteGroupConfig(mode="multi"),
         interference=InterferenceAvoidanceConfig(),
         stations=station_template("all"),

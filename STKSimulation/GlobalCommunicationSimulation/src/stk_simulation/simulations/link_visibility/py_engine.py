@@ -9,14 +9,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
 import numpy as np
 from skyfield.api import EarthSatellite, Loader, wgs84
 
-from stk_simulation.infrastructure.tle import load_latest_tle
+from stk_simulation.infrastructure.tle import TLEData
 from stk_simulation.simulations.common import OutputResult, parse_stk_time
 from stk_simulation.simulations.link_visibility.config import (
     AERRecord,
@@ -191,29 +190,11 @@ def _extract_windows(handles, grid, ts, config: LinkVisibilityConfig):
     return tuple(windows), aer_records
 
 
-def _read_tle_lines(config: LinkVisibilityConfig) -> tuple[str, str, str]:
-    """返回 (line1, line2, 来源说明)。本地文件优先，否则在线。"""
-    if config.tle_file:
-        path = Path(config.tle_file)
-        if not path.is_file():
-            raise ValueError(f"TLE 文件不存在：{path}")
-        lines = [ln.strip() for ln in path.read_text(encoding="ascii", errors="replace").splitlines() if ln.strip()]
-        line1 = next((ln for ln in lines if ln.startswith("1 ")), "")
-        line2 = next((ln for ln in lines if ln.startswith("2 ")), "")
-        if not line1 or not line2:
-            raise ValueError("TLE 文件中未找到两行根数（应以 '1 ' 与 '2 ' 开头）。")
-        return line1, line2, f"本地文件 {path.name}"
-
-    tle = load_latest_tle(config.satellite.tle_url, config.paths.data_dir, config.satellite.ssc)
-    lines = [ln.strip() for ln in tle.path.read_text(encoding="ascii").splitlines() if ln.strip()]
-    line1 = next(ln for ln in lines if ln.startswith("1 "))
-    line2 = next(ln for ln in lines if ln.startswith("2 "))
-    return line1, line2, f"在线 {tle.path.name}"
-
-
-def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibilityResult:
+def compute_link_visibility_python(
+    config: LinkVisibilityConfig, *, tle: TLEData | None = None,
+) -> LinkVisibilityResult:
     """运行纯 Python 星地建链与 AER 计算，输出含单站窗口与合并轨迹的富结果。"""
-    line1, line2, tle_source = _read_tle_lines(config)
+    tle = tle or config.satellite.load_tle(config.paths.data_dir, local_file=config.tle_file)
 
     stations = list(config.stations[:2])
     if not stations:
@@ -221,7 +202,7 @@ def compute_link_visibility_python(config: LinkVisibilityConfig) -> LinkVisibili
 
     loader = Loader(str(config.paths.data_dir))
     ts = loader.timescale(builtin=True)
-    sat = EarthSatellite(line1, line2, config.satellite.name, ts)
+    sat = EarthSatellite(tle.line1, tle.line2, config.satellite.name, ts)
     handles = [_StationHandle(ts, sat, st) for st in stations]
 
     start_utc = parse_stk_time(config.scenario.start_time)

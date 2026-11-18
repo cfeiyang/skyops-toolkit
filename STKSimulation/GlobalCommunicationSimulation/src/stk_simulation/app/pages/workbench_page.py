@@ -1,15 +1,19 @@
 """Surface common STK 12 operations as forms and direct actions."""
 
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QThread, Qt, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox,
+    QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPlainTextEdit, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QMessageBox, QPlainTextEdit, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from stk_simulation.app.icons import action_button, apply_icon
+from stk_simulation.app.widgets.side_navigation import SectionStack, SideNavigation
+from stk_simulation.infrastructure.paths import application_root
+from stk_simulation.infrastructure.reference_satellite import ReferenceSatellite
 from stk_simulation.stk import workbench_commands as commands
 from stk_simulation.stk.desktop_bridge import invoke
 
@@ -76,6 +80,11 @@ def fields(*entries):
     return container
 
 
+def prepare_reference_orbit(profile: ReferenceSatellite, create: bool):
+    tle = profile.load_tle(application_root() / "data")
+    return commands.satellite(profile.name, "tle", create, tle1=tle.line1, tle2=tle.line2)
+
+
 class DesktopTask(QThread):
     reply = Signal(dict)
 
@@ -87,19 +96,10 @@ class DesktopTask(QThread):
 
     def run(self):
         try:
-            self.reply.emit(invoke(self.action, self.plan, self.scenario))
+            plan = self.plan() if callable(self.plan) else self.plan
+            self.reply.emit(invoke(self.action, plan, self.scenario))
         except Exception as error:
             self.reply.emit({"error": str(error)})
-
-
-class OperationForms(QStackedWidget):
-    def sizeHint(self):
-        page = self.currentWidget()
-        return page.sizeHint() if page else super().sizeHint()
-
-    def minimumSizeHint(self):
-        page = self.currentWidget()
-        return page.minimumSizeHint() if page else super().minimumSizeHint()
 
 
 class WorkbenchPage(QWidget):
@@ -114,6 +114,7 @@ class WorkbenchPage(QWidget):
 
         self._error_detail = ""
         self._selections = []
+        self._reference_satellite = ReferenceSatellite()
         self._build_connection()
         self._build_forms()
 
@@ -140,21 +141,7 @@ class WorkbenchPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(14)
 
-        rail = QVBoxLayout()
-        rail.setSpacing(5)
-        group = QButtonGroup(self)
-        group.setExclusive(True)
-        for index, (title, artwork) in enumerate(STEPS):
-            item = action_button(title, artwork)
-            item.setObjectName("stepButton")
-            item.setCheckable(True)
-            group.addButton(item, index)
-            rail.addWidget(item)
-        group.button(0).setChecked(True)
-        rail.addStretch(1)
-        outer.addLayout(rail)
-
-        self.forms = OperationForms()
+        self.forms = SectionStack()
 
         panel = QFrame()
         panel.setObjectName("workbenchPanel")
@@ -195,12 +182,11 @@ class WorkbenchPage(QWidget):
         column_layout.addWidget(panel)
         column_layout.addStretch(1)
         scroll.setWidget(column)
-        outer.addWidget(scroll, 1)
-
         for builder in (self._scene_form, self._satellite_form, self._station_form,
                         self._constraints_form, self._access_form):
             self.forms.addWidget(builder())
-        group.idClicked.connect(self.forms.setCurrentIndex)
+        outer.addWidget(SideNavigation(STEPS, self.forms))
+        outer.addWidget(scroll, 1)
         self.forms.currentChanged.connect(self._refresh_actions)
         self._refresh_actions()
 
@@ -275,8 +261,8 @@ class WorkbenchPage(QWidget):
         self.sat_mode = dropdown(("创建卫星", "new"), ("更新卫星", "edit"), ("导出星历", "export"))
         self.sat_name = QLineEdit("Satellite1")
         self.sat_existing = self._selection("satellites")
-        self.source = dropdown(("经典轨道根数", "classical"), ("导入星历文件", "ephemeris"),
-                               ("两行 TLE", "tle"))
+        self.source = dropdown(("使用公共卫星", "reference"), ("经典轨道根数", "classical"),
+                               ("导入星历文件", "ephemeris"), ("两行 TLE", "tle"))
         self._add_fields(layout, fields(("操作", self.sat_mode, 1)))
         self.sat_name_fields = fields(("卫星名", self.sat_name, 2))
         self.sat_existing_fields = fields(("卫星", self.sat_existing, 2))
@@ -298,7 +284,10 @@ class WorkbenchPage(QWidget):
         self.tle = QPlainTextEdit()
         self.tle.setPlaceholderText("粘贴两行 TLE，保留行内空格")
         self.tle.setFixedHeight(72)
+        self.reference_source_label = QLabel(self._reference_satellite.label)
+        self.reference_source_label.setObjectName("hintLabel")
         self.orbit_fields = {
+            "reference": fields(("公共卫星", self.reference_source_label, 2)),
             "classical": fields(
                 ("半长轴（km）", self.axis, 1), ("倾角（°）", self.inc, 1),
                 ("偏心率", self.ecc, 1), ("参考系", self.orbit_frame, 1),
@@ -313,7 +302,8 @@ class WorkbenchPage(QWidget):
         }
         for key, form in self.orbit_fields.items():
             self._add_fields(layout, form)
-            form.setVisible(key == "classical")
+            form.setVisible(key == "reference")
+        self.sat_name_fields.hide()
         self.sat_existing_fields.hide()
         self.sat_mode.currentIndexChanged.connect(self._update_sat_fields)
         self.source.currentIndexChanged.connect(self._update_sat_fields)
@@ -403,7 +393,7 @@ class WorkbenchPage(QWidget):
     def _update_sat_fields(self):
         mode = self.sat_mode.currentData()
         source = "export" if mode == "export" else self.source.currentData()
-        self.sat_name_fields.setVisible(mode == "new")
+        self.sat_name_fields.setVisible(mode == "new" and source != "reference")
         self.sat_existing_fields.setVisible(mode != "new")
         self.source_fields.setVisible(mode != "export")
         for key, form in self.orbit_fields.items():
@@ -419,6 +409,10 @@ class WorkbenchPage(QWidget):
     def set_simulation_busy(self, busy):
         self._simulation_busy = busy
         self._refresh_actions()
+
+    def set_reference_satellite(self, profile: ReferenceSatellite) -> None:
+        self._reference_satellite = profile
+        self.reference_source_label.setText(profile.label)
 
     def _refresh_actions(self):
         index = self.forms.currentIndex()
@@ -469,6 +463,11 @@ class WorkbenchPage(QWidget):
             if mode == "export":
                 return commands.export_ephemeris(sat, self.export_path.text()), "已导出星历。"
             source = self.source.currentData()
+            if source == "reference":
+                profile = self._reference_satellite
+                if mode == "edit" and sat.casefold() != profile.name.casefold():
+                    raise ValueError(f"请选择公共卫星 {profile.name}，或切换轨道来源。")
+                return partial(prepare_reference_orbit, profile, mode == "new"), "已应用公共卫星轨道。"
             tle = self.tle.toPlainText().strip().splitlines() if source == "tle" else []
             if source == "tle" and len(tle) != 2:
                 raise ValueError("请输入同一颗卫星的两行 TLE。")
@@ -503,7 +502,8 @@ class WorkbenchPage(QWidget):
     def _start(self, action, plan, success):
         if self.is_busy or self._simulation_busy or (plan is not None and not self._connected):
             return
-        expected = self._scenario if plan and plan.requires_scenario else ""
+        needs_scenario = callable(plan) or (plan is not None and plan.requires_scenario)
+        expected = self._scenario if needs_scenario else ""
         self._task = DesktopTask(action, plan, expected, self)
         self._task.reply.connect(self._receive)
         self._task.finished.connect(self._finished)

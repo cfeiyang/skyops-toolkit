@@ -33,6 +33,7 @@ class PlotWidget(QWidget):
         self.figure = Figure(figsize=(10, 6), facecolor="white", layout="constrained")
         self.axes = self.figure.add_subplot(111)
         self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumSize(180, 125)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.toolbar.setIconSize(QSize(18, 18))
         for action in self.toolbar.actions():

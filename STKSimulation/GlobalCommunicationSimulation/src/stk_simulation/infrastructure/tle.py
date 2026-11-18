@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from time import time
 from urllib.error import URLError
 from urllib.parse import urlparse
@@ -12,7 +14,7 @@ from urllib.request import Request, urlopen
 
 @dataclass(frozen=True)
 class TLEData:
-    """一次在线更新得到的参考星数据。"""
+    """指定目录号的 TLE 及解析后的轨道根数。"""
 
     path: Path
     epoch: float
@@ -22,6 +24,28 @@ class TLEData:
     arg_perigee: float
     raan: float
     mean_anomaly: float
+    line1: str
+    line2: str
+
+
+def default_tle_url(ssc: int) -> str:
+    return f"https://celestrak.org/NORAD/elements/gp.php?CATNR={ssc}&FORMAT=TLE"
+
+
+def read_local_tle(file: str | Path, ssc: int) -> TLEData:
+    path = Path(file)
+    if not path.is_file():
+        raise FileNotFoundError(f"TLE 文件不存在：{path}")
+    _, tle = _parse_tle(path.read_text(encoding="utf-8-sig"), ssc, path)
+    return tle
+
+
+def resolve_tle(
+    ssc: int, cache_dir: str | Path, *, url: str = "", local_file: str = "",
+) -> TLEData:
+    if local_file:
+        return read_local_tle(local_file, ssc)
+    return load_latest_tle(url.replace("{ssc}", str(ssc)) or default_tle_url(ssc), cache_dir, ssc)
 
 
 def load_latest_tle(
@@ -32,7 +56,8 @@ def load_latest_tle(
     max_cache_age: float = 7200.0,
 ) -> TLEData:
     """获取指定 SSC 的最新 TLE；网络失败时使用已有有效缓存。"""
-    path = Path(cache_dir) / f"{ssc}_LATEST.tle"
+    extra = "" if url == default_tle_url(ssc) else "_" + sha256(url.encode()).hexdigest()[:10]
+    path = Path(cache_dir) / f"{ssc}_LATEST{extra}.tle"
     cached = _read_cache(path, ssc)
     if cached is not None and time() - path.stat().st_mtime < max_cache_age:
         print(f"[TLE] 使用两小时内的最新缓存: {path}")
@@ -41,10 +66,18 @@ def load_latest_tle(
         content = _download(url, timeout)
         normalized, tle = _parse_tle(content, ssc, path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(f"{path.suffix}.tmp")
-        temporary.write_text(normalized, encoding="ascii", newline="\n")
-        temporary.replace(path)
-        print(f"[TLE] 已从 CelesTrak 更新 SSC={ssc}: {path}")
+        with NamedTemporaryFile(
+            mode="w", encoding="ascii", newline="\n", dir=path.parent, delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            try:
+                stream.write(normalized)
+                stream.close()
+                temporary.replace(path)
+            finally:
+                stream.close()
+                temporary.unlink(missing_ok=True)
+        print(f"[TLE] 已在线更新 SSC={ssc}: {path}")
         return tle
     except (OSError, TimeoutError, UnicodeError, URLError, ValueError) as error:
         cached = _read_cache(path, ssc)
@@ -52,7 +85,7 @@ def load_latest_tle(
             print(f"[TLE] 在线更新失败，使用本地缓存: {path}；原因: {error}")
             return cached
         raise RuntimeError(
-            f"无法从 CelesTrak 获取 SSC={ssc} 的 TLE，且没有有效缓存：{error}"
+            f"无法在线获取 SSC={ssc} 的 TLE，且没有有效缓存：{error}"
         ) from error
 
 
@@ -85,7 +118,7 @@ def _parse_tle(content: str, ssc: int, path: Path) -> tuple[str, TLEData]:
         if not line2.startswith("2 ") or line2[2:7].strip() != target:
             continue
         if len(line1) < 69 or len(line2) < 69:
-            raise ValueError("CelesTrak 返回的 TLE 行长度无效。")
+            raise ValueError("TLE 行长度无效。")
         name = (
             lines[index - 1].strip()
             if index > 0 and not lines[index - 1].startswith(("1 ", "2 "))
@@ -101,6 +134,8 @@ def _parse_tle(content: str, ssc: int, path: Path) -> tuple[str, TLEData]:
                 arg_perigee=float(line2[34:42]),
                 raan=float(line2[17:25]),
                 mean_anomaly=float(line2[43:51]),
+                line1=line1[:69],
+                line2=line2[:69],
             )
         except (IndexError, ValueError) as error:
             raise ValueError(f"SSC={ssc} 的 TLE 轨道根数格式无效。") from error

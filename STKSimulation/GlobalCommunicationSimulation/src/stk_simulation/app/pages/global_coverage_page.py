@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -12,14 +11,14 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QSpinBox,
-    QSplitter,
+    QSizePolicy,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -28,8 +27,10 @@ from PySide6.QtWidgets import (
 )
 
 from stk_simulation.app.dialogs.station_dialog import StationDialog
-from stk_simulation.app.icons import action_button, icon
+from stk_simulation.app.icons import action_button
 from stk_simulation.app.widgets.plot_widget import PlotWidget
+from stk_simulation.app.widgets.side_navigation import SectionStack, SideNavigation
+from stk_simulation.simulations.common import SatelliteConfig
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.presets import (
     StationConfig,
@@ -54,10 +55,12 @@ class GlobalCoveragePage(QWidget):
         super().__init__(parent)
         self._config = copy.deepcopy(config)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_scenario_tab(), icon("globe"), "场景与覆盖")
-        self.tabs.addTab(self._build_satellite_tab(), icon("satellite"), "卫星与链路")
-        self.tabs.addTab(self._build_station_tab(), icon("radio-tower"), "地面站配置")
+        self.sections = SectionStack()
+        self.parameter_pages = (
+            self._build_scenario_tab(), self._build_satellite_tab(), self._build_station_tab(),
+        )
+        for page in self.parameter_pages:
+            self.sections.addWidget(page)
 
         self.run_button = action_button("开始仿真", "play", primary=True)
         self.run_button.clicked.connect(lambda: self._request_run("normal"))
@@ -67,19 +70,14 @@ class GlobalCoveragePage(QWidget):
         self.run_all_button.clicked.connect(lambda: self._request_run("document"))
         self.status_label = QLabel("就绪")
         self.status_label.setObjectName("statusLabel")
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.status_label.setMinimumWidth(155)
 
         actions = QHBoxLayout()
-        actions.addWidget(self.run_button)
-        actions.addWidget(self.gain_button)
+        actions.addWidget(self.status_label, 1)
         actions.addWidget(self.run_all_button)
-        actions.addStretch(1)
-        actions.addWidget(self.status_label)
-
-        parameter_panel = QWidget()
-        parameter_layout = QVBoxLayout(parameter_panel)
-        parameter_layout.setContentsMargins(0, 0, 0, 0)
-        parameter_layout.addWidget(self.tabs)
-        parameter_layout.addLayout(actions)
+        actions.addWidget(self.gain_button)
+        actions.addWidget(self.run_button)
 
         self.result_tabs = QTabWidget()
         self.result_tabs.setDocumentMode(True)
@@ -93,17 +91,35 @@ class GlobalCoveragePage(QWidget):
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.addWidget(self.gain_summary_label)
         result_layout.addWidget(self.result_tabs, 1)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(parameter_panel)
-        splitter.addWidget(result_panel)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([320, 560])
+        self.sections.addWidget(result_panel)
+        self.sections.currentChanged.connect(self._show_section_actions)
 
-        layout = QVBoxLayout(self)
+        panel = QFrame()
+        panel.setObjectName("toolPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(13, 10, 13, 11)
+        panel_layout.addWidget(self.sections, 1)
+        panel_layout.addLayout(actions)
+
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(splitter)
+        layout.setSpacing(14)
+        layout.addWidget(SideNavigation((
+            ("场景与覆盖", "globe"), ("星座与约束", "satellite"),
+            ("地面站", "radio-tower"), ("仿真结果", "chart-no-axes-column-increasing"),
+        ), self.sections))
+        self.panel_area = QVBoxLayout()
+        self.panel_area.addWidget(panel)
+        self.panel_area.addStretch(1)
+        layout.addLayout(self.panel_area, 1)
         self.write_config(config)
+        self._show_section_actions(0)
+
+    def _show_section_actions(self, index: int) -> None:
+        self.gain_button.setVisible(index == 2)
+        expanded = index in (2, 3)
+        self.panel_area.setStretch(0, int(expanded))
+        self.panel_area.setStretch(1, int(not expanded))
 
     def _build_scenario_tab(self) -> QWidget:
         tab = QWidget()
@@ -126,8 +142,8 @@ class GlobalCoveragePage(QWidget):
         coverage_group.setLayout(coverage_form)
 
         layout = QHBoxLayout(tab)
-        layout.addWidget(scenario_group, 1)
-        layout.addWidget(coverage_group, 1)
+        layout.addWidget(scenario_group, 1, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(coverage_group, 1, Qt.AlignmentFlag.AlignTop)
         return tab
 
     def _build_satellite_tab(self) -> QWidget:
@@ -140,25 +156,14 @@ class GlobalCoveragePage(QWidget):
         )
         self.satellite_summary = QLabel()
         self.satellite_summary.setObjectName("hintLabel")
-        self.satellite_name_field = QLineEdit()
-        self.satellite_name_field.textChanged.connect(
-            self._update_satellite_summary
-        )
-        self.ssc_field = QSpinBox()
-        self.ssc_field.setRange(1, 999999999)
         self.satellite_step_field = _double_spin(
             1.0, 86400.0, 1.0, 2, " s"
         )
-        self.tle_url_field = QLineEdit()
-        self.ssc_field.valueChanged.connect(self._sync_tle_url)
 
         satellite_form = QFormLayout()
         satellite_form.addRow("卫星方案", self.satellite_field)
         satellite_form.addRow("当前卫星", self.satellite_summary)
-        satellite_form.addRow("参考星名称", self.satellite_name_field)
-        satellite_form.addRow("参考星 SSC", self.ssc_field)
         satellite_form.addRow("传播步长", self.satellite_step_field)
-        satellite_form.addRow("TLE 在线地址", self.tle_url_field)
         satellite_group = QGroupBox("轨道与三星偏置")
         satellite_group.setLayout(satellite_form)
 
@@ -187,7 +192,7 @@ class GlobalCoveragePage(QWidget):
         right.addStretch(1)
 
         layout = QHBoxLayout(tab)
-        layout.addWidget(satellite_group, 2)
+        layout.addWidget(satellite_group, 2, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(right, 1)
         return tab
 
@@ -255,19 +260,16 @@ class GlobalCoveragePage(QWidget):
         config.scenario.start_time = self.start_field.text().strip()
         config.scenario.stop_time = self.stop_field.text().strip()
         config.satellite_group.mode = str(self.satellite_field.currentData())
-        config.satellite.name = self.satellite_name_field.text().strip()
-        config.satellite.ssc = self.ssc_field.value()
         config.satellite.step = self.satellite_step_field.value()
-        config.satellite.tle_url = self.tle_url_field.text().strip()
         config.coverage.resolution = self.resolution_field.value()
         config.coverage.min_elevation = self.min_elevation_field.value()
         config.interference.enabled = self.avoidance_enabled_field.isChecked()
         config.interference.angle = self.avoidance_angle_field.value()
         config.stations = self._read_stations()
-        if not config.scenario.name or not config.satellite.name:
-            raise ValueError("场景名称和参考星名称不能为空。")
-        if not config.satellite.tle_url:
-            raise ValueError("TLE 在线地址不能为空。")
+        if not config.scenario.name:
+            raise ValueError("场景名称不能为空。")
+        if config.satellite_group.mode == "multi" and config.satellite.name.upper() in {"TN02A", "TN03A"}:
+            raise ValueError("参考星名称不能与三星方案中的派生星重名。")
         return config
 
     def write_config(self, config: GlobalCoverageConfig) -> None:
@@ -277,10 +279,7 @@ class GlobalCoveragePage(QWidget):
         self.stop_field.setText(config.scenario.stop_time)
         self.resolution_field.setValue(config.coverage.resolution)
         self.min_elevation_field.setValue(config.coverage.min_elevation)
-        self.satellite_name_field.setText(config.satellite.name)
-        self.ssc_field.setValue(config.satellite.ssc)
         self.satellite_step_field.setValue(config.satellite.step)
-        self.tle_url_field.setText(config.satellite.tle_url)
         self.avoidance_enabled_field.setChecked(config.interference.enabled)
         self.avoidance_angle_field.setValue(config.interference.angle)
         self.avoidance_angle_field.setEnabled(config.interference.enabled)
@@ -292,16 +291,22 @@ class GlobalCoveragePage(QWidget):
         self._fill_station_table(config.stations)
         self._update_satellite_summary()
 
+    def set_reference_satellite(self, profile) -> None:
+        self._config.satellite = SatelliteConfig.from_reference(profile, self.satellite_step_field.value())
+        self._update_satellite_summary()
+
     def set_busy(self, busy: bool) -> None:
         self.run_button.setEnabled(not busy)
         self.gain_button.setEnabled(not busy)
         self.run_all_button.setEnabled(not busy)
-        self.tabs.setEnabled(not busy)
+        for page in self.parameter_pages:
+            page.setEnabled(not busy)
         for plot_widget in self._plot_widgets:
             plot_widget.set_busy(busy)
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
+        self.status_label.setToolTip(text)
 
     def show_result(self, result, run_mode: str = "normal") -> None:
         from stk_simulation.simulations.global_coverage.service import (
@@ -314,6 +319,7 @@ class GlobalCoveragePage(QWidget):
             render_global_coverage,
             current_index=2 if run_mode == "gain" else 0,
         )
+        self.sections.setCurrentIndex(3)
         if run_mode == "document":
             self.gain_summary_label.setVisible(False)
             self.set_status(f"文档全部方案完成 · {result.output.result_dir}")
@@ -363,7 +369,7 @@ class GlobalCoveragePage(QWidget):
 
     def _submit(self, config: GlobalCoverageConfig, run_mode: str) -> None:
         status = {
-            "normal": "准备连接 STK...",
+            "normal": "正在准备仿真…",
             "gain": f"准备计算 {config.comparison_station_name} 的覆盖增益...",
             "document": "准备运行文档全部方案...",
         }
@@ -374,25 +380,6 @@ class GlobalCoveragePage(QWidget):
         self._fill_station_table(
             station_template(str(self.station_preset_field.currentData()))
         )
-
-    def _sync_tle_url(self, ssc: int) -> None:
-        url = self.tle_url_field.text().strip()
-        if not url:
-            return
-        parts = urlsplit(url)
-        query = dict(parse_qsl(parts.query, keep_blank_values=True))
-        query["CATNR"] = str(ssc)
-        query.setdefault("FORMAT", "TLE")
-        updated_url = urlunsplit(
-            (
-                parts.scheme,
-                parts.netloc,
-                parts.path,
-                urlencode(query),
-                parts.fragment,
-            )
-        )
-        self.tle_url_field.setText(updated_url)
 
     def _add_station(self) -> None:
         existing_names = {
@@ -447,7 +434,7 @@ class GlobalCoveragePage(QWidget):
             self.station_table.removeRow(row)
 
     def _update_satellite_summary(self) -> None:
-        names = [self.satellite_name_field.text().strip() or "TN01A"]
+        names = [self._config.satellite.name]
         if self.satellite_field.currentData() == "multi":
             names.extend(("TN02A", "TN03A"))
         self.satellite_summary.setText("、".join(names))
@@ -520,6 +507,7 @@ class GlobalCoveragePage(QWidget):
         self.result_tabs.setCurrentIndex(
             min(max(current_index, 0), self.result_tabs.count() - 1)
         )
+        self.result_tabs.tabBar().setVisible(self.result_tabs.count() > 1)
 
 
 def _double_spin(

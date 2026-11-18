@@ -10,7 +10,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from stk_simulation.infrastructure.tle import TLEData, load_latest_tle
+from stk_simulation.infrastructure.tle import TLEData
 from stk_simulation.simulations.common import OutputResult
 from stk_simulation.simulations.global_coverage.config import GlobalCoverageConfig
 from stk_simulation.simulations.global_coverage.presets import (
@@ -189,7 +189,7 @@ def run_document_scenarios(
     progress: Callable[[str], None] | None = None,
 ) -> GlobalCoverageResult:
     """运行 Word 文档规定的三组场景，并输出海外站覆盖增量图。"""
-    _report(progress, "正在从 CelesTrak 更新参考星 TLE...")
+    _report(progress, "正在读取公共卫星的 TLE...")
     tle = _load_reference_tle(base_config)
     jobs = (
         ("single", "single", "单星临港", "global_coverage_1sat_1station.png"),
@@ -413,11 +413,7 @@ def _create_satellites(
 
 
 def _load_reference_tle(config: GlobalCoverageConfig) -> TLEData:
-    return load_latest_tle(
-        config.satellite.tle_url,
-        config.paths.data_dir,
-        config.satellite.ssc,
-    )
+    return config.satellite.load_tle(config.paths.data_dir)
 
 
 def _apply_interference_avoidance(

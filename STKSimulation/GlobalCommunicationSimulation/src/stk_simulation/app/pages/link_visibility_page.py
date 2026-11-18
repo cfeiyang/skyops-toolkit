@@ -37,6 +37,8 @@ from PySide6.QtWidgets import (
 )
 
 from stk_simulation.app.icons import action_button, apply_icon
+from stk_simulation.app.widgets.side_navigation import SideNavigation
+from stk_simulation.simulations.common import SatelliteConfig
 from stk_simulation.simulations.link_visibility.config import (
     LinkStationConfig,
     LinkVisibilityConfig,
@@ -255,25 +257,28 @@ class LinkVisibilityPage(QWidget):
 
     # ---------------------------------------------------------------- UI
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        outer.addWidget(scroll)
-
-        container = QWidget()
-        scroll.setWidget(container)
-        root = QVBoxLayout(container)
-
-        root.addWidget(self._build_tle_card())
-
+        outer.setSpacing(14)
+        self.sections = QStackedWidget()
+        settings = QWidget()
+        parameters = QVBoxLayout(settings)
+        parameters.setSpacing(10)
         loc_row = QHBoxLayout()
         loc_row.addWidget(self._build_loc_card(0))
         loc_row.addWidget(self._build_loc_card(1))
-        root.addLayout(loc_row)
+        parameters.addLayout(loc_row)
+        parameters.addWidget(self._build_compute_bar())
+        parameters.addStretch(1)
+        self.sections.addWidget(self._scroll(settings))
 
-        root.addWidget(self._build_compute_bar())
+        results = QWidget()
+        root = QVBoxLayout(results)
+        self.run_context = QLabel()
+        self.run_context.setObjectName("hintLabel")
+        self.run_context.setWordWrap(True)
+        self.run_context.hide()
+        root.addWidget(self.run_context)
 
         # 4 张指标卡
         metrics_row = QHBoxLayout()
@@ -326,6 +331,8 @@ class LinkVisibilityPage(QWidget):
         self._downloads: list[dict] = []
         self.dl_group.currentIndexChanged.connect(self._refresh_win_options)
         self.dl_win.currentIndexChanged.connect(self._refresh_preview)
+        root.addStretch(1)
+        self.sections.addWidget(self._scroll(results))
 
         # 世界地图动画
         map_card = QGroupBox("星下点轨迹（世界地图）")
@@ -355,33 +362,37 @@ class LinkVisibilityPage(QWidget):
         ctrl.addWidget(self.slider, 1)
         ctrl.addWidget(self.map_status)
         map_layout.addLayout(ctrl)
-        root.addWidget(map_card)
+        self.sections.addWidget(self._scroll(map_card))
 
         self.status_label = QLabel("就绪：等待启动建链计算")
         self.status_label.setObjectName("statusLabel")
-        root.addWidget(self.status_label)
+        panel = QFrame()
+        panel.setObjectName("toolPanel")
+        content = QVBoxLayout(panel)
+        content.setContentsMargins(11, 10, 11, 11)
+        content.addWidget(self.sections, 1)
+        content.addWidget(self.status_label)
+        outer.addWidget(SideNavigation((
+            ("站点与时段", "radio-tower"), ("窗口与下载", "download"),
+            ("轨迹地图", "globe"),
+        ), self.sections))
+        outer.addWidget(panel, 1)
+
+    @staticmethod
+    def _scroll(content: QWidget) -> QScrollArea:
+        widget = QScrollArea()
+        widget.setObjectName("toolScroll")
+        widget.setWidgetResizable(True)
+        widget.setFrameShape(QFrame.Shape.NoFrame)
+        content.setObjectName("toolScrollContent")
+        widget.setWidget(content)
+        return widget
 
     def _section(self, title: str, widget: QWidget) -> QWidget:
         group = QGroupBox(title)
         layout = QVBoxLayout(group)
         layout.addWidget(widget)
         return group
-
-    def _build_tle_card(self) -> QWidget:
-        card = QGroupBox("卫星 TLE")
-        layout = QVBoxLayout(card)
-        self.tle_info = QLabel("卫星 " + (self._config.satellite.name or "—"))
-        self.tle_info.setObjectName("statusLabel")
-        layout.addWidget(self.tle_info)
-        up = QHBoxLayout()
-        self.tle_file_label = QLabel("未选择本地文件")
-        self.tle_file_label.setObjectName("hintLabel")
-        btn = action_button("选择 TLE 文件", "upload")
-        btn.clicked.connect(self._pick_tle)
-        up.addWidget(self.tle_file_label, 1)
-        up.addWidget(btn)
-        layout.addLayout(up)
-        return card
 
     def _build_loc_card(self, index: int) -> QWidget:
         st = self._config.stations[index]
@@ -453,15 +464,14 @@ class LinkVisibilityPage(QWidget):
         layout.addWidget(self.days_spin)
         self.run_btn = action_button("计算两地通信时长", "play", primary=True)
         self.run_btn.clicked.connect(lambda: self._emit_run())
-        layout.addWidget(self.run_btn, 1)
+        layout.addStretch(1)
+        layout.addWidget(self.run_btn)
         return card
 
     # ---------------------------------------------------------------- 动作
-    def _pick_tle(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "选择 TLE 文件", "", "TLE 文件 (*.tle *.txt);;所有文件 (*.*)")
-        if path:
-            self._config.tle_file = path
-            self.tle_file_label.setText(Path(path).name)
+    def set_reference_satellite(self, profile) -> None:
+        self._config.satellite = SatelliteConfig.from_reference(profile, self._config.satellite.step)
+        self._config.tle_file = ""
 
     def _read_loc(self, index: int) -> LinkStationConfig:
         loc = getattr(self, f"_loc{index}")
@@ -523,7 +533,9 @@ class LinkVisibilityPage(QWidget):
 
     def show_result(self, result: LinkVisibilityResult) -> None:
         self._last_result = result
-        self.tle_info.setText(f"卫星 {result.satellite_name} · 时段 {result.start_time} ~ {result.stop_time}")
+        self.run_context.setText(f"卫星 {result.satellite_name} · {result.start_time} 至 {result.stop_time}")
+        self.run_context.show()
+        self.sections.setCurrentIndex(1)
         self._build_downloads(result)
 
         # 指标卡

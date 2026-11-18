@@ -9,7 +9,6 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from stk_simulation.infrastructure.tle import load_latest_tle
 from stk_simulation.simulations.common import OutputResult, _stk_time
 from stk_simulation.simulations.link_visibility.config import (
     AERRecord,
@@ -35,11 +34,7 @@ def compute_link_visibility_stk(root, config: LinkVisibilityConfig) -> LinkVisib
     from stk_simulation.stk.constraints import STKConstraints
     from stk_simulation.stk.objects import STKObjects
 
-    tle = load_latest_tle(
-        config.satellite.tle_url,
-        config.paths.data_dir,
-        config.satellite.ssc,
-    )
+    tle = config.satellite.load_tle(config.paths.data_dir, local_file=config.tle_file)
     scenario = STKSession.create_scenario(
         root,
         config.scenario.name,
@@ -119,7 +114,7 @@ def compute_link_visibility_stk(root, config: LinkVisibilityConfig) -> LinkVisib
         )
 
     # 复用轻量星下点轨迹用于绘图展示
-    py_ref = compute_link_visibility_python(config)
+    py_ref = compute_link_visibility_python(config, tle=tle)
     image_name = "link_visibility_stk.png"
     return LinkVisibilityResult(
         engine_used="stk",

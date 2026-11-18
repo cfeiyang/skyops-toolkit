@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from stk_simulation.infrastructure.paths import application_root
+from stk_simulation.infrastructure.reference_satellite import ReferenceSatellite
+from stk_simulation.infrastructure.tle import resolve_tle
 
 
 @dataclass
@@ -40,6 +42,16 @@ class SatelliteConfig:
     ssc: int
     step: float
     tle_url: str
+    tle_file: str = ""
+
+    @classmethod
+    def from_reference(cls, profile: ReferenceSatellite, step: float) -> "SatelliteConfig":
+        return cls(profile.name, profile.ssc, step, profile.tle_url, profile.tle_file)
+
+    def load_tle(self, cache_dir, *, local_file: str = ""):
+        return resolve_tle(
+            self.ssc, cache_dir, url=self.tle_url, local_file=local_file or self.tle_file,
+        )
 
 
 @dataclass

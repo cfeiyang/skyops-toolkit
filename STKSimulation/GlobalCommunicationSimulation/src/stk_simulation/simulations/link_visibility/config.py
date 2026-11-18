@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Tuple
+from stk_simulation.infrastructure.reference_satellite import ReferenceSatellite
 
 from stk_simulation.simulations.common import (
     OutputResult,
@@ -119,12 +119,7 @@ def default_link_visibility_config() -> LinkVisibilityConfig:
             start_time=start_time,
             stop_time=stop_time,
         ),
-        satellite=SatelliteConfig(
-            name="智慧天网-1 01A",
-            ssc=59705,
-            step=30.0,
-            tle_url="https://celestrak.org/NORAD/elements/gp.php?CATNR=59705&FORMAT=TLE",
-        ),
+        satellite=SatelliteConfig.from_reference(ReferenceSatellite(), step=30.0),
         stations=[
             LinkStationConfig(
                 name="上海临港站",
