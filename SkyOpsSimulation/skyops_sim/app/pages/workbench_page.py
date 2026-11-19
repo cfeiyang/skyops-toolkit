@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QThread, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox,
+    QComboBox, QDateTimeEdit, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPlainTextEdit, QScrollArea, QVBoxLayout, QWidget,
 )
@@ -21,7 +21,6 @@ from skyops_sim.stk.desktop_bridge import invoke
 STEPS = (
     ("场景", "calendar-range"),
     ("地面站", "radio-tower"),
-    ("角度约束", "scan-line"),
     ("可见性计算", "clock-3"),
 )
 
@@ -181,7 +180,7 @@ class WorkbenchPage(QWidget):
         column_layout.addWidget(panel)
         column_layout.addStretch(1)
         scroll.setWidget(column)
-        for builder in (self._object_form, self._station_form, self._constraints_form, self._access_form):
+        for builder in (self._object_form, self._station_form, self._access_form):
             self.forms.addWidget(builder())
         outer.addWidget(SideNavigation(STEPS, self.forms))
         outer.addWidget(scroll, 1)
@@ -329,15 +328,14 @@ class WorkbenchPage(QWidget):
         return page
 
     def _station_form(self):
-        page, layout = self._form("地面站位置")
+        page, layout = self._form("地面站")
         self.site_mode = dropdown(("添加地面站", "new"), ("更新已有地面站", "edit"))
         self.site_name = QLineEdit("Station1")
         self.site_existing = self._selection("stations")
         self.lat = decimal(31.2304, -90, 90, 6)
         self.lon = decimal(121.4737, -180, 180, 6)
-        self.height = dropdown(("参考椭球面", "ellipsoid"), ("平均海平面（MSL）", "msl"),
-                               ("读取场景地形", "terrain"))
-        self.alt = decimal(10, -12000, 100000)
+        self.site_gso = decimal(15, 0, 180)
+        self.site_elevation = decimal(10, -90, 90)
         self.site_name_fields = fields(("地面站名", self.site_name, 2))
         self.site_existing_fields = fields(("地面站", self.site_existing, 2))
         self._add_fields(layout, fields(("操作", self.site_mode, 1)))
@@ -345,46 +343,10 @@ class WorkbenchPage(QWidget):
         self._add_fields(layout, self.site_existing_fields)
         self._add_fields(layout, fields(
             ("纬度（°）", self.lat, 1), ("经度（°）", self.lon, 1),
-            ("高程基准", self.height, 1), ("高程（m）", self.alt, 1),
+            ("GSO 隔离角（°）", self.site_gso, 1), ("最低仰角（°）", self.site_elevation, 1),
         ))
         self.site_existing_fields.hide()
         self.site_mode.currentIndexChanged.connect(self._update_site_fields)
-        self.height.currentIndexChanged.connect(
-            lambda: self.alt.setEnabled(self.height.currentData() != "terrain"),
-        )
-        layout.addStretch(1)
-        return page
-
-    def _constraints_form(self):
-        page, layout = self._form("角度约束")
-        self.constraint_site = self._selection("stations")
-        self.reference = self._selection("satellites")
-        self.angles = {}
-        entries = [("应用到地面站", self.constraint_site, 2)]
-        for key, title, initial, low, high in (
-            ("elevation", "最小仰角（°）", 10, -90, 90),
-            ("sun", "太阳隔离角（°）", 15, 0, 180),
-            ("moon", "月球隔离角（°）", 10, 0, 180),
-            ("separation", "参考卫星隔离角（°）", 5, 0, 90),
-        ):
-            control = QWidget()
-            row = QHBoxLayout(control)
-            row.setContentsMargins(0, 0, 0, 0)
-            enabled = QCheckBox("设置")
-            enabled.setAccessibleName("设置" + title)
-            amount = decimal(initial, low, high)
-            enabled.setChecked(key == "elevation")
-            amount.setEnabled(enabled.isChecked())
-            enabled.toggled.connect(amount.setEnabled)
-            row.addWidget(enabled)
-            row.addWidget(amount, 1)
-            entries.append((title, control, 1))
-            self.angles[key] = (enabled, amount)
-        self._add_fields(layout, fields(*entries))
-        self.reference_fields = fields(("参考卫星", self.reference, 1))
-        self._add_fields(layout, self.reference_fields)
-        self.reference_fields.hide()
-        self.angles["separation"][0].toggled.connect(self.reference_fields.setVisible)
         layout.addStretch(1)
         return page
 
@@ -448,7 +410,6 @@ class WorkbenchPage(QWidget):
             {"new": ("创建卫星", "plus"), "edit": ("更新卫星", "pencil"),
              "export": ("导出星历", "download")}[self.sat_mode.currentData()],
             ("添加地面站", "plus") if self.site_mode.currentData() == "new" else ("更新地面站", "pencil"),
-            ("应用约束", "scan-line"),
             ("计算可见时段", "play"),
         )
         text, artwork = captions[index]
@@ -505,13 +466,10 @@ class WorkbenchPage(QWidget):
         if page == 2:
             create = self.site_mode.currentData() == "new"
             station = self.site_name.text() if create else self._selected(self.site_existing, "地面站")
-            return commands.station(station, self.lat.value(), self.lon.value(), self.alt.value(),
-                                    self.height.currentData(), create), "已保存地面站位置。"
-        if page == 3:
-            angles = {key: amount.value() if enabled.isChecked() else None
-                      for key, (enabled, amount) in self.angles.items()}
-            return commands.constraints(self._selected(self.constraint_site, "地面站"),
-                                        reference=self.reference.currentText(), **angles), "已应用角度约束。"
+            return commands.station(
+                station, self.lat.value(), self.lon.value(), create,
+                elevation=self.site_elevation.value(), gso=self.site_gso.value(),
+            ), "已保存地面站位置和角度约束。"
         return commands.access(self._selected(self.access_sat, "卫星"),
                                self._selected(self.access_site, "地面站")), "已计算可见时段，请在 STK 查看。"
 

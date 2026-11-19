@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from skyops_sim.app.icons import action_button
+from skyops_sim.infrastructure.paths import application_root
 from skyops_sim.infrastructure.reference_satellite import ReferenceSatellite
 from skyops_sim.infrastructure.tle import default_tle_url, read_local_tle
 
@@ -126,8 +127,12 @@ class SatelliteSettingsDialog(QDialog):
         self.copy_url.setText("已复制")
 
     def _browse(self):
+        root = application_root()
+        start = root / "data"
+        if not start.is_dir():
+            start = root
         file, _ = QFileDialog.getOpenFileName(
-            self, "选择 TLE 文件", self.file.text(), "TLE 文件 (*.tle *.txt)"
+            self, "选择 TLE 文件", self.file.text() or str(start), "TLE 文件 (*.tle *.txt)"
         )
         if file:
             self.file.setText(str(Path(file)))

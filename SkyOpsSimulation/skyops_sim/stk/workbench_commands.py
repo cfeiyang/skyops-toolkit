@@ -108,36 +108,22 @@ def export_ephemeris(sat, file):
                 outputs=(file,))
 
 
-def station(station_name, lat, lon, altitude_m, height_type, create):
+def station(station_name, lat, lon, create, *, elevation, gso):
     station_name = name(station_name, "地面站名")
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         raise ValueError("纬度须在 −90° 至 90°，经度须在 −180° 至 180°。")
+    if not -90 <= elevation <= 90:
+        raise ValueError("最低仰角须在 −90° 至 90°。")
+    if not 0 <= gso <= 180:
+        raise ValueError("GSO 隔离角须在 0° 至 180°。")
+    target = f"*/Facility/{station_name}"
     commands = [f"New / */Facility {station_name} CentralBody Earth NoDefault"] if create else []
-    altitude = "Terrain" if height_type == "terrain" else number(altitude_m)
-    msl = " MSL" if height_type == "msl" else ""
-    commands += [UNITS, f"SetPosition */Facility/{station_name} Geodetic {number(lat)} {number(lon)} {altitude}{msl}"]
-    return Plan(tuple(commands))
-
-
-def constraints(station_name, elevation=None, sun=None, moon=None, reference="", separation=None):
-    target = f"*/Facility/{name(station_name, '地面站名')}"
-    commands = []
-    for value, keyword, low, high in (
-        (elevation, "ElevationAngle Min", -90, 90),
-        (sun, "LOSSunExclusion", 0, 180),
-        (moon, "LOSLunarExclusion", 0, 180),
-    ):
-        if value is not None:
-            if not low <= value <= high:
-                raise ValueError("请输入约束允许范围内的角度。")
-            commands.append(f"SetConstraint {target} {keyword} {number(value)}")
-    if separation is not None:
-        ref = name(reference, "参考卫星名")
-        if not 0 <= separation <= 90:
-            raise ValueError("卫星隔离角须在 0° 至 90°。")
-        commands.append(f"SetConstraint {target} ObjectExclusionAngle Satellite/{ref} {number(separation)}")
-    if not commands:
-        raise ValueError("请至少勾选一项约束。")
+    commands += [
+        UNITS,
+        f"SetPosition {target} Geodetic {number(lat)} {number(lon)} 0",
+        f"SetConstraint {target} ElevationAngle Min {number(elevation)} IncludeIntervals",
+        f"SetConstraint {target} GeoExclusion {number(gso)} IncludeIntervals",
+    ]
     return Plan(tuple(commands))
 
 

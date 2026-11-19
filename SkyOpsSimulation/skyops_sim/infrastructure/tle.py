@@ -58,10 +58,14 @@ def load_latest_tle(
     """获取指定 SSC 的最新 TLE；网络失败时使用已有有效缓存。"""
     extra = "" if url == default_tle_url(ssc) else "_" + sha256(url.encode()).hexdigest()[:10]
     path = Path(cache_dir) / f"{ssc}_LATEST{extra}.tle"
-    cached = _read_cache(path, ssc)
-    if cached is not None and time() - path.stat().st_mtime < max_cache_age:
-        print(f"[TLE] 使用两小时内的最新缓存: {path}")
-        return cached
+    cached = _read_available_cache(path, ssc)
+    if cached is not None:
+        try:
+            if time() - cached.path.stat().st_mtime < max_cache_age:
+                print(f"[TLE] 使用有效期内的本地缓存: {cached.path}")
+                return cached
+        except OSError:
+            pass
     try:
         content = _download(url, timeout)
         normalized, tle = _parse_tle(content, ssc, path)
@@ -80,12 +84,15 @@ def load_latest_tle(
         print(f"[TLE] 已在线更新 SSC={ssc}: {path}")
         return tle
     except (OSError, TimeoutError, UnicodeError, URLError, ValueError) as error:
-        cached = _read_cache(path, ssc)
+        cached = _read_available_cache(path, ssc)
         if cached is not None:
-            print(f"[TLE] 在线更新失败，使用本地缓存: {path}；原因: {error}")
+            print(f"[TLE] 在线更新失败，使用本地缓存: {cached.path}；原因: {error}")
             return cached
         raise RuntimeError(
-            f"无法在线获取 SSC={ssc} 的 TLE，且没有有效缓存：{error}"
+            f"无法在线获取 SSC={ssc} 的 TLE，且未找到有效缓存。\n"
+            f"请检查网络或系统代理，或在右上角「卫星设置」中选用本地 TLE 文件。\n"
+            f"缓存位置：{path}\n"
+            f"详细原因：{error}"
         ) from error
 
 
@@ -151,3 +158,16 @@ def _read_cache(path: Path, ssc: int) -> TLEData | None:
     except (OSError, UnicodeError, ValueError):
         return None
     return tle
+
+
+def _read_available_cache(path: Path, ssc: int) -> TLEData | None:
+    cached = _read_cache(path, ssc)
+    if cached is not None:
+        return cached
+    project = path.parent.parent
+    if project.name.casefold() == "dist":
+        project = project.parent
+    if project.name.casefold() == "skyopssimulation":
+        legacy = project.parent / "STKSimulation" / "GlobalCommunicationSimulation" / "data"
+        return _read_cache(legacy / path.name, ssc)
+    return None
