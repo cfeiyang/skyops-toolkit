@@ -192,21 +192,10 @@ def _extract_windows(handles, grid, ts, config: LinkVisibilityConfig):
     return tuple(windows), aer_records
 
 
-def compute_link_visibility_python(
-    config: LinkVisibilityConfig, *, tle: TLEData | None = None,
-) -> LinkVisibilityResult:
-    """运行纯 Python 星地建链与 AER 计算，输出含单站窗口与合并轨迹的富结果。"""
-    tle = tle or config.satellite.load_tle(config.paths.data_dir, local_file=config.tle_file)
-
-    stations = list(config.stations[:2])
-    if not stations:
-        raise ValueError("至少需要一个地面站。")
-
+def orbit_samples(config: LinkVisibilityConfig, tle: TLEData):
     loader = Loader(str(config.paths.data_dir))
     ts = loader.timescale(builtin=True)
     sat = EarthSatellite(tle.line1, tle.line2, config.satellite.name, ts)
-    handles = [_StationHandle(ts, sat, st) for st in stations]
-
     start_utc = parse_stk_time(config.scenario.start_time)
     stop_utc = parse_stk_time(config.scenario.stop_time)
     if stop_utc <= start_utc:
@@ -218,35 +207,24 @@ def compute_link_visibility_python(
     grid = [start_utc + timedelta(seconds=i * step) for i in range(int(span_sec // step) + 1)]
     if grid[-1] < stop_utc:
         grid.append(stop_utc)
+    return sat, ts, grid
+
+
+def build_track(sat, ts, grid, handles, visibility):
+    """从 TLE 生成两幅图共用的轨迹，建链状态由本次计算引擎提供。"""
     t_grid = ts.from_datetimes(grid)
-
-    # 两地通信窗口 + AER
-    combined_windows, aer_records = _extract_windows(handles, grid, ts, config)
-
-    # 单站窗口与累计时长 + 单站 AER 采样
-    station_windows: dict[str, tuple[AccessWindow, ...]] = {}
-    station_totals: dict[str, float] = {}
-    station_aer: dict[str, tuple[AERRecord, ...]] = {}
-    for h in handles:
-        ws, aer = _extract_windows([h], grid, ts, config)
-        station_windows[h.station.name] = ws
-        station_totals[h.station.name] = sum(w.duration_sec for w in ws)
-        station_aer[h.station.name] = tuple(aer)
-
-    # 星下点轨迹 + 单站建链状态
     positions = sat.at(t_grid)
     sub = wgs84.subpoint_of(positions)
     orbit = OrbitTrack(
-        elapsed_sec=tuple((dt - start_utc).total_seconds() for dt in grid),
+        elapsed_sec=tuple((dt - grid[0]).total_seconds() for dt in grid),
         inertial_km=positions.xyz.km.T,
         inertial_to_earth=np.moveaxis(itrs.rotation_at(t_grid), -1, 0),
     )
-    vis = [np.asarray(h.visible_at(t_grid), dtype=bool) for h in handles]
     els = [np.asarray(h.altaz(t_grid)[0].degrees) for h in handles]
     track = []
     for idx, dt in enumerate(grid):
-        linked1 = bool(vis[0][idx])
-        linked2 = bool(vis[1][idx]) if len(handles) > 1 else False
+        linked1 = bool(visibility[0][idx])
+        linked2 = bool(visibility[1][idx]) if len(handles) > 1 else False
         el1 = float(els[0][idx])
         el2 = float(els[1][idx]) if len(handles) > 1 else 0.0
         track.append(
@@ -262,17 +240,45 @@ def compute_link_visibility_python(
                 linked2=linked2,
             )
         )
+    return orbit, tuple(track)
+
+
+def compute_link_visibility_python(
+    config: LinkVisibilityConfig, *, tle: TLEData | None = None,
+) -> LinkVisibilityResult:
+    """运行纯 Python 星地建链与 AER 计算，输出含单站窗口与合并轨迹的富结果。"""
+    tle = tle or config.satellite.load_tle(config.paths.data_dir, local_file=config.tle_file)
+    stations = list(config.stations[:2])
+    if not stations:
+        raise ValueError("至少需要一个地面站。")
+    sat, ts, grid = orbit_samples(config, tle)
+    handles = [_StationHandle(ts, sat, st) for st in stations]
+
+    combined_windows, aer_records = _extract_windows(handles, grid, ts, config)
+    station_windows: dict[str, tuple[AccessWindow, ...]] = {}
+    station_totals: dict[str, float] = {}
+    station_aer: dict[str, tuple[AERRecord, ...]] = {}
+    for handle in handles:
+        windows, series = _extract_windows([handle], grid, ts, config)
+        name = handle.station.name
+        station_windows[name] = windows
+        station_totals[name] = sum(window.duration_sec for window in windows)
+        station_aer[name] = tuple(series)
+
+    t_grid = ts.from_datetimes(grid)
+    visibility = [handle.visible_at(t_grid) for handle in handles]
+    orbit, track = build_track(sat, ts, grid, handles, visibility)
 
     image_name = "link_visibility_python.png"
     return LinkVisibilityResult(
         engine_used="python",
         satellite_name=config.satellite.name,
         station_names=tuple(st.name for st in stations),
-        start_time=_fmt_bj(start_utc),
-        stop_time=_fmt_bj(stop_utc),
+        start_time=_fmt_bj(grid[0]),
+        stop_time=_fmt_bj(grid[-1]),
         windows=combined_windows,
         aer_records=tuple(aer_records),
-        ground_track=tuple(track),
+        ground_track=track,
         station_windows=station_windows,
         station_totals=station_totals,
         station_aer=station_aer,

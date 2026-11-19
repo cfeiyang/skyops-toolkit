@@ -17,7 +17,7 @@ from skyops_sim.simulations.link_visibility.py_engine import (
 
 
 def run_link_visibility(
-    root,
+    desktop,
     config: LinkVisibilityConfig,
     run_mode: str = "normal",
     progress: Callable[[str], None] | None = None,
@@ -29,12 +29,11 @@ def run_link_visibility(
         py_res = compute_link_visibility_python(config)
         if progress:
             progress("正在运行 STK 12.6 官方引擎计算 Access 窗口...")
-        # 延迟导入：stk_engine 依赖 agi.stk12
         from skyops_sim.simulations.link_visibility.stk_engine import (
             compute_link_visibility_stk,
         )
 
-        stk_res = compute_link_visibility_stk(root, config)
+        stk_res = compute_link_visibility_stk(desktop, config)
 
         # 按开始时间就近配对（带容差），避免窗口数不一致时按索引错位配对
         tolerance = timedelta(seconds=120)
@@ -72,16 +71,19 @@ def run_link_visibility(
             )
         py_res.engine_used = "compare"
         py_res.diff_items = tuple(diffs)
+        py_res.stk_scenario = stk_res.stk_scenario
         return py_res
 
-    if getattr(config.stk, "engine", "python") == "stk" and root is not None:
+    if config.stk.engine == "stk":
+        if desktop is None:
+            raise RuntimeError("STK 会话未初始化。")
         if progress:
             progress("[STK 引擎] 正在计算星地建链 Access 与 AER...")
         from skyops_sim.simulations.link_visibility.stk_engine import (
             compute_link_visibility_stk,
         )
 
-        return compute_link_visibility_stk(root, config)
+        return compute_link_visibility_stk(desktop, config)
 
     if progress:
         progress("[Python 引擎] 正在计算 SGP4 星地建链与二分法精化窗口...")

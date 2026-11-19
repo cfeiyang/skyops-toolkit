@@ -21,7 +21,7 @@ class STKSession:
         except ImportError as exc:
             raise RuntimeError(
                 "当前环境未安装 STK 12 Python API (agi.stk12)。"
-                "请切换至顶部的「⚡ 纯 Python 极速引擎」运行，或在装有 STK 12.6 的环境中运行。"
+                "全球覆盖可选择 Python 引擎，或在安装了 STK 12 Python API 的环境中运行。"
             ) from exc
 
         if normalized_mode == "new":

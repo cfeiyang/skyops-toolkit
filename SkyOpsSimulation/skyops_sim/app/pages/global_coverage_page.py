@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from skyops_sim.app.dialogs.station_dialog import StationDialog
 from skyops_sim.app.icons import action_button
+from skyops_sim.app.widgets.engine_selection import EngineSelection
 from skyops_sim.app.widgets.plot_widget import PlotWidget
 from skyops_sim.app.widgets.side_navigation import SectionStack, SideNavigation
 from skyops_sim.simulations.common import SatelliteConfig
@@ -70,6 +71,10 @@ class GlobalCoveragePage(QWidget):
         actions.addWidget(self.run_all_button)
         actions.addWidget(self.gain_button)
         actions.addWidget(self.run_button)
+        self.engine_selection = EngineSelection(config.stk)
+        engine_row = QHBoxLayout()
+        engine_row.addWidget(self.engine_selection)
+        engine_row.addStretch(1)
 
         self.result_tabs = QTabWidget()
         self.result_tabs.setDocumentMode(True)
@@ -91,6 +96,7 @@ class GlobalCoveragePage(QWidget):
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(13, 10, 13, 11)
         panel_layout.addWidget(self.sections, 1)
+        panel_layout.addLayout(engine_row)
         panel_layout.addLayout(actions)
 
         layout = QHBoxLayout(self)
@@ -275,6 +281,7 @@ class GlobalCoveragePage(QWidget):
         self._update_satellite_summary()
 
     def set_busy(self, busy: bool) -> None:
+        self.engine_selection.setEnabled(not busy)
         self.run_button.setEnabled(not busy)
         self.gain_button.setEnabled(not busy)
         self.run_all_button.setEnabled(not busy)
@@ -353,6 +360,7 @@ class GlobalCoveragePage(QWidget):
             "document": "准备运行文档全部方案...",
         }
         self.set_status(status[run_mode])
+        config.stk = self.engine_selection.config()
         self.run_requested.emit(config, run_mode)
 
     def _add_station(self) -> None:

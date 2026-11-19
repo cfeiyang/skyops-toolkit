@@ -95,7 +95,7 @@ def _stk_time(value: datetime) -> str:
     )
     return (
         f"{value.day} {months[value.month - 1]} {value.year} "
-        f"{value:%H:%M:%S}.000"
+        f"{value:%H:%M:%S}.{value.microsecond // 1000:03d}"
     )
 
 

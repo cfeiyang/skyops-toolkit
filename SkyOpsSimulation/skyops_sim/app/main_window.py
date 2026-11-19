@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
+    QButtonGroup, QDialog, QFrame, QHBoxLayout, QMainWindow,
     QMessageBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -14,7 +14,6 @@ from skyops_sim.app.dialogs.satellite_settings import (
 from skyops_sim.app.icons import action_button
 from skyops_sim.app.pages.global_coverage_page import GlobalCoveragePage
 from skyops_sim.app.pages.link_visibility_page import LinkVisibilityPage
-from skyops_sim.app.pages.workbench_page import WorkbenchPage
 from skyops_sim.app.simulation_controller import SimulationController
 from skyops_sim.simulations.global_coverage.config import config_global_coverage
 from skyops_sim.simulations.link_visibility.config import default_link_visibility_config
@@ -31,8 +30,8 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.coverage_page = GlobalCoveragePage(config_global_coverage())
         self.link_page = LinkVisibilityPage(default_link_visibility_config())
-        self.workbench_page = WorkbenchPage()
-        for page in (self.coverage_page, self.link_page, self.workbench_page):
+        self._active_page = self.coverage_page
+        for page in (self.coverage_page, self.link_page):
             self.stack.addWidget(page)
 
         header = QFrame()
@@ -45,7 +44,6 @@ class MainWindow(QMainWindow):
         for index, (title, artwork) in enumerate((
             ("全球覆盖", "globe"),
             ("建链可见性", "radio-tower"),
-            ("STK 工作台", "satellite"),
         )):
             button = action_button(title, artwork)
             button.setObjectName("navButton")
@@ -56,11 +54,6 @@ class MainWindow(QMainWindow):
         nav_group.idClicked.connect(self.stack.setCurrentIndex)
         header_layout.addStretch(1)
 
-        self.header_controls = QStackedWidget()
-        self.header_controls.addWidget(self._engine_controls())
-        self.header_controls.addWidget(self.workbench_page.connection_controls)
-        self.stack.currentChanged.connect(self._show_header_controls)
-        header_layout.addWidget(self.header_controls)
         self.satellite_settings = action_button("卫星设置", "orbit")
         self.satellite_settings.clicked.connect(self._edit_satellite)
         header_layout.addWidget(self.satellite_settings)
@@ -87,14 +80,15 @@ class MainWindow(QMainWindow):
         self.controller.completed.connect(self._show_result)
         self.controller.failed.connect(self._show_error)
         self.controller.status_changed.connect(self._on_status_changed)
-        self.workbench_page.busy_changed.connect(self._refresh_task_controls)
-        self._on_engine_changed()
+        self.link_page.stk_file_requested.connect(self._start_stk_file)
+        self.controller.stk_file_saved.connect(
+            lambda path: self.link_page.set_status(f"已保存至 {path}")
+        )
 
     def _set_reference_satellite(self, profile) -> None:
         self._reference_satellite = profile
         self.coverage_page.set_reference_satellite(profile)
         self.link_page.set_reference_satellite(profile)
-        self.workbench_page.set_reference_satellite(profile)
         self.satellite_settings.setText(f"卫星设置 · {profile.name}")
         source = "本地 TLE" if profile.tle_file else "TLE 在线更新"
         self.satellite_settings.setToolTip(f"{profile.label}\n{source}")
@@ -105,67 +99,29 @@ class MainWindow(QMainWindow):
             self._set_reference_satellite(dialog.profile)
             save_reference_satellite(dialog.profile)
 
-    def _engine_controls(self) -> QWidget:
-        widget = QWidget()
-        row = QHBoxLayout(widget)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        row.addStretch(1)
-        row.addWidget(QLabel("计算引擎"))
-        self.engine_combo = QComboBox()
-        self.engine_combo.addItem("基于 Python", "python")
-        self.engine_combo.addItem("连接 STK", "stk")
-        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
-        row.addWidget(self.engine_combo)
-
-        self.stk_mode_label = QLabel("STK 会话")
-        self.stk_mode = QComboBox()
-        self.stk_mode.addItem("新建 STK 实例", "new")
-        self.stk_mode.addItem("连接已运行 STK", "running")
-        self.connection_status = QLabel()
-        self.connection_status.setObjectName("connectionStatus")
-        row.addWidget(self.stk_mode_label)
-        row.addWidget(self.stk_mode)
-        row.addWidget(self.connection_status)
-        return widget
-
-    def _show_header_controls(self, _index: int) -> None:
-        is_workbench = self.stack.currentWidget() is self.workbench_page
-        self.header_controls.setCurrentIndex(1 if is_workbench else 0)
-
-    def _on_engine_changed(self) -> None:
-        is_stk = self.engine_combo.currentData() == "stk"
-        self.stk_mode_label.setVisible(is_stk)
-        self.stk_mode.setVisible(is_stk)
-        self.connection_status.setText("STK 尚未连接" if is_stk else "Python 引擎就绪")
-
     def _start(self, config, run_mode: str, task_type: str) -> None:
-        if self.workbench_page.is_busy:
+        if self.controller.is_busy:
             return
         try:
-            config.stk.engine = str(self.engine_combo.currentData())
-            config.stk.mode = str(self.stk_mode.currentData())
             self._run_mode = run_mode
-            self.connection_status.setText("正在计算…")
+            self._active_page = self.link_page if task_type == "link_visibility" else self.coverage_page
             self.controller.start(config, run_mode, task_type=task_type)
         except Exception as error:
-            QMessageBox.critical(self, "无法开始仿真", str(error))
+            self._show_error(str(error))
+
+    def _start_stk_file(self, action: str, path: str, scenario: str) -> None:
+        if self.controller.is_busy:
+            return
+        self._active_page = self.link_page
+        try:
+            self.controller.save_stk_file(action, path, scenario)
+        except Exception as error:
+            self._show_error(str(error))
 
     def _on_status_changed(self, text: str) -> None:
-        self.coverage_page.set_status(text)
-        self.link_page.set_status(text)
+        self._active_page.set_status(text)
 
     def _set_simulation_busy(self, busy: bool) -> None:
-        self.workbench_page.set_simulation_busy(busy)
-        self._refresh_task_controls()
-        if not busy:
-            is_stk = self.engine_combo.currentData() == "stk"
-            self.connection_status.setText("STK 已就绪" if is_stk else "Python 引擎就绪")
-
-    def _refresh_task_controls(self) -> None:
-        busy = self.controller.is_busy or self.workbench_page.is_busy
-        self.engine_combo.setEnabled(not busy)
-        self.stk_mode.setEnabled(not busy)
         self.satellite_settings.setEnabled(not busy)
         self.coverage_page.set_busy(busy)
         self.link_page.set_busy(busy)
@@ -179,11 +135,11 @@ class MainWindow(QMainWindow):
 
     def _show_error(self, message: str) -> None:
         self._run_mode = "normal"
-        self.connection_status.setText("仿真执行异常")
-        QMessageBox.critical(self, "仿真错误", message)
+        self._active_page.set_status(message.splitlines()[0] if message else "操作失败")
+        QMessageBox.warning(self, "操作未完成", message)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.controller.is_busy or self.workbench_page.is_busy:
+        if self.controller.is_busy:
             QMessageBox.information(self, "操作进行中", "请等待当前操作完成后再关闭。")
             event.ignore()
             return

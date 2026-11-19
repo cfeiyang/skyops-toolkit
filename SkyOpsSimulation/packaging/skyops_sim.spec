@@ -15,7 +15,7 @@ try:
     binaries += list(stk_binaries)
     hiddenimports += list(stk_hiddenimports)
 except Exception:
-    print("[打包提示] 当前环境未检测到 agi.stk12，STK 工作台仍可通过本机 COM 连接，仿真引擎将使用 Python。")
+    print("[打包提示] 未检测到 agi.stk12。建链仍可直接连接 STK 12 Desktop，全球覆盖可使用 Python 引擎。")
 
 for pkg in ("mpl_toolkits.basemap_data", "skyfield", "sgp4"):
     try:

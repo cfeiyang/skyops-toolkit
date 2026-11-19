@@ -1,135 +1,135 @@
-"""基于 STK 12.6 COM 接口的星地建链与 AER 计算引擎。
-
-所有 agi.stk12 依赖都延迟到函数内部导入，保证未安装 STK 的电脑
-导入本模块也不会崩溃。
-"""
+"""使用 STK Desktop 计算两地 Access 和 AER。"""
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from uuid import uuid4
 
-from skyops_sim.simulations.common import OutputResult, _stk_time
+from skyops_sim.simulations.common import OutputResult, _stk_time, parse_stk_time
 from skyops_sim.simulations.link_visibility.config import (
-    AERRecord,
-    AccessWindow,
-    LinkVisibilityConfig,
-    LinkVisibilityResult,
+    AERRecord, AccessWindow, LinkVisibilityConfig, LinkVisibilityResult,
 )
-from skyops_sim.simulations.link_visibility.py_engine import compute_link_visibility_python
-from skyops_sim.stk.access import STKAccess
-from skyops_sim.stk.session import STKSession
+from skyops_sim.simulations.link_visibility.py_engine import (
+    _fmt_bj, _StationHandle, build_track, orbit_samples,
+)
+from skyops_sim.stk.desktop_bridge import STKDesktopBridge
+from skyops_sim.stk.link_commands import build_scene
 
-LOCAL_TZ = ZoneInfo("Asia/Shanghai")
-TIME_FMT = "%Y-%m-%d %H:%M:%S"
-
-
-def _fmt_bj(dt_utc: datetime) -> str:
-    return dt_utc.astimezone(LOCAL_TZ).strftime(TIME_FMT)
+Interval = tuple[datetime, datetime]
 
 
-def compute_link_visibility_stk(root, config: LinkVisibilityConfig) -> LinkVisibilityResult:
-    """通过 STK 12 计算星地 Access 窗口与 AER 数据。"""
-    # 延迟导入：objects.py / constraints.py 顶层依赖 agi.stk12
-    from skyops_sim.stk.constraints import STKConstraints
-    from skyops_sim.stk.objects import STKObjects
-
-    tle = config.satellite.load_tle(config.paths.data_dir, local_file=config.tle_file)
-    scenario = STKSession.create_scenario(
-        root,
-        config.scenario.name,
-        config.scenario.start_time,
-        config.scenario.stop_time,
-    )
-    sat = STKObjects.create_satellite_from_tle(
-        root,
-        scenario,
-        "SAT_LINK",
-        config.satellite.ssc,
-        config.satellite.step,
-        tle.path,
-    )
-
-    active_stations = config.stations[:2] if config.dual_station_sync else config.stations[:1]
-    facilities = []
-    for idx, st in enumerate(active_stations):
-        fac = STKObjects.create_facility(
-            scenario, f"Station_{idx + 1}", st.latitude_deg, st.longitude_deg, st.altitude_m / 1000.0
-        )
-        STKConstraints.set_min_elevation(fac, st.min_elevation_deg)
-        facilities.append((st, fac))
-
-    # 获取单站或双站交集窗口
-    raw_intervals = STKAccess.compute_access_intervals(facilities[0][1], sat)
-    if len(facilities) > 1:
-        second_intervals = STKAccess.compute_access_intervals(facilities[1][1], sat)
-        intersected: list[tuple[datetime, datetime]] = []
-        for s1, e1 in raw_intervals:
-            for s2, e2 in second_intervals:
-                s_max = max(s1, s2)
-                e_min = min(e1, e2)
-                if e_min > s_max:
-                    intersected.append((s_max, e_min))
-        raw_intervals = intersected
-
-    windows: list[AccessWindow] = []
-    aer_records: list[AERRecord] = []
-
-    for acc_num, (w_start, w_stop) in enumerate(raw_intervals, start=1):
-        start_utcg = _stk_time(w_start.replace(tzinfo=None))
-        stop_utcg = _stk_time(w_stop.replace(tzinfo=None))
-        peak_el = -90.0
-        peak_time = _fmt_bj(w_start)
-
-        for st_cfg, fac_obj in facilities:
-            rows = STKAccess.compute_aer_series(
-                fac_obj, sat, start_utcg, stop_utcg, config.sample_step_sec
-            )
-            for row in rows:
-                el_val = row["elevation_deg"]
-                t_bj = _fmt_bj(row["dt_utc"])
-                if el_val > peak_el:
-                    peak_el = el_val
-                    peak_time = t_bj
-                aer_records.append(
-                    AERRecord(
-                        access_number=acc_num,
-                        station_name=st_cfg.name,
-                        time=t_bj,
-                        azimuth_deg=row["azimuth_deg"],
-                        elevation_deg=el_val,
-                        range_km=row["range_km"],
-                    )
+def _collect_windows(desktop, scenario, stations, intervals, indices, sample_step):
+    """为每个窗口按相同时间网格请求两站的 AER，保证导出时能逐行对齐。"""
+    requests = [
+        {"station": i, "start": _stk_time(start), "stop": _stk_time(stop)}
+        for start, stop in intervals for i in indices
+    ]
+    if not requests:
+        return (), ()
+    response = desktop.request("sample", scenario=scenario, windows=requests, step=sample_step)
+    series = iter(response["samples"])
+    windows, records = [], []
+    for number, (start, stop) in enumerate(intervals, 1):
+        rows = []
+        for index in indices:
+            data = next(series)
+            rows.extend(
+                AERRecord(
+                    number, stations[index].name, _fmt_bj(parse_stk_time(time)),
+                    float(azimuth), float(elevation), float(distance),
                 )
-
-        windows.append(
-            AccessWindow(
-                access_number=acc_num,
-                start_time=_fmt_bj(w_start),
-                stop_time=_fmt_bj(w_stop),
-                duration_sec=(w_stop - w_start).total_seconds(),
-                max_elevation_deg=max(peak_el, 0.0),
-                max_elevation_time=peak_time,
+                for time, azimuth, elevation, distance in zip(
+                    data["time"], data["azimuth"], data["elevation"], data["range"], strict=True
+                )
             )
-        )
+        peak = max(rows, key=lambda row: row.elevation_deg, default=None)
+        windows.append(AccessWindow(
+            number, _fmt_bj(start), _fmt_bj(stop), (stop - start).total_seconds(),
+            peak.elevation_deg if peak else 0.0, peak.time if peak else _fmt_bj(start),
+        ))
+        records.extend(rows)
+    return tuple(windows), tuple(records)
 
-    # 复用轻量星下点轨迹用于绘图展示
-    py_ref = compute_link_visibility_python(config, tle=tle)
+
+def _intersect(left: list[Interval], right: list[Interval]) -> list[Interval]:
+    intersections = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        start = max(left[i][0], right[j][0])
+        end = min(left[i][1], right[j][1])
+        if start < end:
+            intersections.append((start, end))
+        if left[i][1] <= right[j][1]:
+            i += 1
+        else:
+            j += 1
+    return intersections
+
+
+def _visible_at(grid, intervals: list[Interval]) -> list[bool]:
+    starts = [start for start, _ in intervals]
+    indices = (bisect_right(starts, time) - 1 for time in grid)
+    return [index >= 0 and time <= intervals[index][1] for time, index in zip(grid, indices)]
+
+
+def compute_link_visibility_stk(
+    desktop: STKDesktopBridge, config: LinkVisibilityConfig,
+) -> LinkVisibilityResult:
+    stations = config.stations[:2] if config.dual_station_sync else config.stations[:1]
+    if not stations:
+        raise ValueError("至少需要一个地面站。")
+    current = desktop.connect(config.stk.mode)
+    if current:
+        raise RuntimeError(f"STK 已打开场景「{current}」。请先在 STK 中保存并关闭该场景，再计算建链。")
+    tle = config.satellite.load_tle(config.paths.data_dir, local_file=config.tle_file)
+    sat, ts, grid = orbit_samples(config, tle)
+    scenario = f"LinkVisibility_{uuid4().hex[:10]}"
+    commands, satellite, facilities = build_scene(scenario, config, tle, stations)
+    result = desktop.request(
+        "prepare", scenario=scenario, commands=commands,
+        satellite=satellite, facilities=facilities,
+    )
+    intervals = [
+        sorted((parse_stk_time(start), parse_stk_time(stop))
+               for start, stop in zip(station["starts"], station["stops"], strict=True))
+        for station in result["intervals"]
+    ]
+    if len(intervals) != len(stations):
+        raise RuntimeError("STK 返回的站点数与配置不符。")
+    combined = _intersect(*intervals) if len(stations) == 2 else intervals[0]
+    step = max(config.sample_step_sec, 1.0)
+    windows, aer = _collect_windows(
+        desktop, scenario, stations, combined, tuple(range(len(stations))), step
+    )
+    station_windows, station_aer = {}, {}
+    for index, (station, times) in enumerate(zip(stations, intervals)):
+        station_windows[station.name], station_aer[station.name] = _collect_windows(
+            desktop, scenario, stations, times, (index,), step
+        )
+    station_totals = {
+        name: sum(window.duration_sec for window in rows) for name, rows in station_windows.items()
+    }
+    handles = [_StationHandle(ts, sat, station) for station in stations]
+    visibility = [_visible_at(grid, times) for times in intervals]
+    orbit, track = build_track(sat, ts, grid, handles, visibility)
+    desktop.satellite_name = config.satellite.name
     image_name = "link_visibility_stk.png"
     return LinkVisibilityResult(
         engine_used="stk",
         satellite_name=config.satellite.name,
-        station_names=tuple(st.name for st in active_stations),
-        start_time=py_ref.start_time,
-        stop_time=py_ref.stop_time,
-        windows=tuple(windows),
-        aer_records=tuple(aer_records),
-        ground_track=py_ref.ground_track,
-        orbit_track=py_ref.orbit_track,
-        tle_epoch=py_ref.tle_epoch,
-        station_windows=py_ref.station_windows,
-        station_totals=py_ref.station_totals,
-        station_aer=py_ref.station_aer,
+        station_names=tuple(station.name for station in stations),
+        start_time=_fmt_bj(grid[0]),
+        stop_time=_fmt_bj(grid[-1]),
+        windows=windows,
+        aer_records=aer,
+        ground_track=track,
+        orbit_track=orbit,
+        tle_epoch=_fmt_bj(sat.epoch.utc_datetime()),
+        station_windows=station_windows,
+        station_totals=station_totals,
+        station_aer=station_aer,
         output=OutputResult(config.paths.result_dir, image_name, config.paths.result_dir / image_name),
         cfg=config,
+        stk_scenario=scenario,
     )

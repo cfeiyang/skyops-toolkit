@@ -4,25 +4,31 @@ from __future__ import annotations
 
 from bisect import bisect_right
 import copy
-from datetime import timedelta
+from datetime import datetime, timezone
+from functools import lru_cache
 from itertools import chain, islice
 from math import isfinite
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from PySide6.QtCore import QElapsedTimer, QEvent, QPointF, QSignalBlocker, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import QDate, QDateTime, QElapsedTimer, QEvent, QPointF, QSignalBlocker, QTime, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QBoxLayout,
     QComboBox,
-    QDateEdit,
+    QDateTimeEdit,
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
+    QPushButton,
     QScrollArea,
     QSlider,
     QSpinBox,
@@ -35,16 +41,31 @@ from PySide6.QtWidgets import (
 
 from skyops_sim.app.aer_export import build_aer_groups, write_aer_csv, write_aer_pdf
 from skyops_sim.app.icons import action_button, apply_icon
+from skyops_sim.app.widgets.engine_selection import EngineSelection
 from skyops_sim.app.widgets.orbit_globe import (
     OrbitGlobeWidget, SATELLITE_COLOR, SPACE_COLOR, STATION_COLORS, world_rings,
 )
 from skyops_sim.app.widgets.side_navigation import SideNavigation
-from skyops_sim.simulations.common import SatelliteConfig
+from skyops_sim.simulations.common import SatelliteConfig, parse_stk_time
 from skyops_sim.simulations.link_visibility.config import (
     LinkStationConfig,
     LinkVisibilityConfig,
     LinkVisibilityResult,
 )
+
+_BEIJING = ZoneInfo("Asia/Shanghai")
+
+
+@lru_cache(maxsize=1)
+def _coastline_path() -> QPainterPath:
+    outline = QPainterPath()
+    for ring in world_rings():
+        lon, lat = ring[0]
+        outline.moveTo(lon, -lat)
+        for lon, lat in ring[1:]:
+            outline.lineTo(lon, -lat)
+    return outline
+
 
 class WorldMapWidget(QWidget):
     """星下点地图。底图和完整轨迹只在数据或尺寸变化时重绘。"""
@@ -57,11 +78,101 @@ class WorldMapWidget(QWidget):
         self._position = 0.0
         self._cache_key = None
         self._background = QPixmap()
+        self._track_path = QPainterPath()
+        self._zoom = 1.0
+        self._offset = QPointF()
+        self._drag_pos: QPointF | None = None
+
+    def reset_view(self) -> None:
+        self._zoom = 1.0
+        self._offset = QPointF()
+        self._update_view()
+
+    def zoom_by(self, factor: float, anchor: QPointF | None = None) -> None:
+        center = self._center()
+        if anchor is None:
+            anchor = center
+        zoom = min(8.0, max(1.0, self._zoom * factor))
+        self._offset = anchor - center - (anchor - center - self._offset) * (zoom / self._zoom)
+        self._zoom = zoom
+        self._update_view()
+
+    def _center(self) -> QPointF:
+        return QPointF(self.width() / 2.0, self.height() / 2.0)
+
+    def _map_height(self) -> float:
+        return min(float(self.height()), self.width() / 2.0)
+
+    def _update_view(self) -> None:
+        height = self._map_height() * self._zoom
+        limit_x = max(0.0, height - self.width() / 2.0)
+        limit_y = max(0.0, (height - self.height()) / 2.0)
+        self._offset = QPointF(
+            min(limit_x, max(-limit_x, self._offset.x())),
+            min(limit_y, max(-limit_y, self._offset.y())),
+        )
+        if self._drag_pos is not None:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif self._zoom > 1.0:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+        self._cache_key = None
+        self.update()
+
+    def wheelEvent(self, event) -> None:
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if delta:
+            self.zoom_by(1.25 ** (delta / 120.0), event.position())
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._zoom > 1:
+            self._drag_pos = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_pos is not None:
+            self._offset += event.position() - self._drag_pos
+            self._drag_pos = event.position()
+            self._update_view()
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            self._drag_pos = None
+            self._update_view()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        self._update_view()
+        super().resizeEvent(event)
 
     def set_data(self, track, stations) -> None:
         self._track = track
         self._stations = tuple(stations[:2])
         self._position = 0.0
+        self._track_path = QPainterPath()
+        previous = None
+        for point in track:
+            lon, lat = point.longitude_deg, point.latitude_deg
+            if not (isfinite(lon) and isfinite(lat)):
+                previous = None
+                continue
+            if previous is None or abs(lon - previous) > 180:
+                self._track_path.moveTo(lon, -lat)
+            else:
+                self._track_path.lineTo(lon, -lat)
+            previous = lon
         self._cache_key = None
         self.update()
 
@@ -71,15 +182,8 @@ class WorldMapWidget(QWidget):
 
     def _project(self, lon: float, lat: float) -> QPointF:
         # 锁定 2:1（360°×180°）等距圆柱投影，避免窗口过宽时把地球横向拉扁
-        width = float(self.width())
-        height = float(self.height())
-        map_h = min(height, width / 2.0)
-        map_w = map_h * 2.0
-        offset_x = (width - map_w) / 2.0
-        offset_y = (height - map_h) / 2.0
-        x = offset_x + (lon + 180.0) / 360.0 * map_w
-        y = offset_y + (90.0 - lat) / 180.0 * map_h
-        return QPointF(x, y)
+        pixels_per_degree = self._map_height() * self._zoom / 180.0
+        return self._center() + self._offset + QPointF(lon, -lat) * pixels_per_degree
 
     def _make_background(self, scale: float) -> QPixmap:
         image = QPixmap(round(self.width() * scale), round(self.height() * scale))
@@ -87,23 +191,19 @@ class WorldMapWidget(QWidget):
         image.fill(QColor(SPACE_COLOR))
         painter = QPainter(image)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#324963"), 0.7))
-        for ring in world_rings():
-            painter.drawPolyline(QPolygonF([self._project(lon, lat) for lon, lat in ring]))
-
-        painter.setPen(QPen(QColor(34, 211, 238), 1.6))
-        segment = []
-        prev_lon = None
-        for point in self._track:
-            lon, lat = point.longitude_deg, point.latitude_deg
-            valid = isfinite(lon) and isfinite(lat)
-            if not valid or (prev_lon is not None and abs(lon - prev_lon) > 180):
-                painter.drawPolyline(QPolygonF(segment))
-                segment.clear()
-            if valid:
-                segment.append(self._project(lon, lat))
-            prev_lon = lon if valid else None
-        painter.drawPolyline(QPolygonF(segment))
+        painter.save()
+        painter.translate(self._center() + self._offset)
+        pixels_per_degree = self._map_height() * self._zoom / 180.0
+        painter.scale(pixels_per_degree, pixels_per_degree)
+        for path, color, thickness in (
+            (_coastline_path(), QColor("#324963"), 0.7),
+            (self._track_path, QColor(34, 211, 238), 1.6),
+        ):
+            pen = QPen(color, thickness * scale)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.drawPath(path)
+        painter.restore()
 
         for station, color in zip(self._stations, STATION_COLORS):
             pos = self._project(station.longitude_deg, station.latitude_deg)
@@ -152,22 +252,6 @@ class WorldMapWidget(QWidget):
 _WINDOW_METRIC_COLUMNS = (3, 4)
 
 
-def _metric_card(title: str, *, emphasized: bool = False) -> tuple[QFrame, QLabel]:
-    card = QFrame()
-    card.setObjectName("metricCard")
-    layout = QVBoxLayout(card)
-    label = QLabel(title)
-    label.setObjectName("fieldCaption")
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    value = QLabel("—")
-    value.setObjectName("metricValue")
-    value.setProperty("emphasized", emphasized)
-    value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    layout.addWidget(label)
-    layout.addWidget(value)
-    return card, value
-
-
 def _fill_window_table(table: QTableWidget, headers: tuple[str, ...], rows) -> None:
     table.verticalHeader().hide()
     table.setAlternatingRowColors(True)
@@ -186,10 +270,16 @@ def _fill_window_table(table: QTableWidget, headers: tuple[str, ...], rows) -> N
     header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
     for column in _WINDOW_METRIC_COLUMNS:
         header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+    visible_rows = max(1, min(6, len(rows)))
+    table.setFixedHeight(
+        header.height() + visible_rows * table.verticalHeader().defaultSectionSize()
+        + table.horizontalScrollBar().sizeHint().height() + 2 * table.frameWidth()
+    )
 
 
 class LinkVisibilityPage(QWidget):
     run_requested = Signal(object, str)
+    stk_file_requested = Signal(str, str, str)
 
     def __init__(self, default_config: LinkVisibilityConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -214,6 +304,16 @@ class LinkVisibilityPage(QWidget):
         settings = QWidget()
         parameters = QVBoxLayout(settings)
         parameters.setSpacing(10)
+        title = QLabel("站点与时段")
+        title.setObjectName("toolHeading")
+        self.satellite_summary = QLabel()
+        self.satellite_summary.setObjectName("hintLabel")
+        heading = QHBoxLayout()
+        heading.addWidget(title)
+        heading.addStretch(1)
+        heading.addWidget(self.satellite_summary)
+        parameters.addLayout(heading)
+        parameters.addWidget(self._build_time_card())
         loc_row = QHBoxLayout()
         loc_row.addWidget(self._build_loc_card(0))
         loc_row.addWidget(self._build_loc_card(1))
@@ -224,25 +324,35 @@ class LinkVisibilityPage(QWidget):
 
         results = QWidget()
         root = QVBoxLayout(results)
+        result_heading = QHBoxLayout()
+        result_title = QLabel("窗口与下载")
+        result_title.setObjectName("toolHeading")
+        result_heading.addWidget(result_title)
+        result_heading.addStretch(1)
+        self.result_engine = QLabel()
+        self.result_engine.setObjectName("hintLabel")
+        result_heading.addWidget(self.result_engine)
+        self.stk_actions = action_button("更多", "chevron-down")
+        menu = QMenu(self.stk_actions)
+        menu.addAction("保存 STK 场景…", lambda: self._request_stk_file("save"))
+        menu.addAction("导出卫星星历…", lambda: self._request_stk_file("ephemeris"))
+        self.stk_actions.setMenu(menu)
+        self.stk_actions.hide()
+        result_heading.addWidget(self.stk_actions)
+        root.addLayout(result_heading)
         self.run_context = QLabel()
         self.run_context.setObjectName("hintLabel")
         self.run_context.setWordWrap(True)
         self.run_context.hide()
         root.addWidget(self.run_context)
 
-        # 4 张指标卡
-        metrics_row = QHBoxLayout()
-        comm_card, self.metric_comm_val = _metric_card("两地通信窗口数")
-        duration_card, self.metric_dur_val = _metric_card("累计通信时长", emphasized=True)
-        station_1_card, self.metric_p1_val = _metric_card("地点 1 可用时长")
-        station_2_card, self.metric_p2_val = _metric_card("地点 2 可用时长")
-        for card in (comm_card, duration_card, station_1_card, station_2_card):
-            metrics_row.addWidget(card, 1)
-        root.addLayout(metrics_row)
+        self.result_summary = QLabel("计算完成后显示窗口和累计通信时长。")
+        self.result_summary.setObjectName("linkSummary")
+        root.addWidget(self.result_summary)
 
         # 窗口表
         self.comm_table = QTableWidget()
-        root.addWidget(self._section("两地通信窗口", self.comm_table))
+        root.addWidget(self._section("两地通信窗口（北京时间）", self.comm_table))
         self.p1_table = QTableWidget()
         self.p2_table = QTableWidget()
         self.station_tables = QWidget()
@@ -255,7 +365,7 @@ class LinkVisibilityPage(QWidget):
         for group in self.station_groups:
             self.station_layout.addWidget(group, 1)
         self.station_tables.installEventFilter(self)
-        root.addWidget(self.station_tables)
+        self.station_tables.hide()
 
         # AER 数据下载：对象（地点1/地点2/两地通信）× 窗口 × 格式（CSV/PDF）
         dl_card = QGroupBox("AER 数据下载")
@@ -276,14 +386,30 @@ class LinkVisibilityPage(QWidget):
         self.dl_btn.setEnabled(False)
         self.dl_btn.clicked.connect(self._export_selected)
         dl_row.addWidget(self.dl_btn)
+        dl_row.addStretch(1)
+        track_button = action_button("查看轨迹", "globe")
+        track_button.clicked.connect(lambda: self.sections.setCurrentIndex(2))
+        dl_row.addWidget(track_button)
+        dl_layout.addLayout(dl_row)
+        preview_row = QHBoxLayout()
+        preview_button = action_button("预览 AER 数据", "layers")
+        preview_button.setCheckable(True)
+        preview_row.addWidget(preview_button)
         self.dl_info = QLabel("—")
         self.dl_info.setObjectName("hintLabel")
-        dl_row.addWidget(self.dl_info, 1)
-        dl_layout.addLayout(dl_row)
+        preview_row.addWidget(self.dl_info, 1)
+        dl_layout.addLayout(preview_row)
         self.dl_preview = QTableWidget()
         self.dl_preview.setMaximumHeight(280)
+        self.dl_preview.hide()
+        preview_button.toggled.connect(self.dl_preview.setVisible)
         dl_layout.addWidget(self.dl_preview)
         root.addWidget(dl_card)
+        stations_toggle = action_button("单站可用窗口", "chevron-down")
+        stations_toggle.setCheckable(True)
+        stations_toggle.toggled.connect(self.station_tables.setVisible)
+        root.addWidget(stations_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
+        root.addWidget(self.station_tables)
 
         self.dl_group.currentIndexChanged.connect(self._refresh_win_options)
         self.dl_win.currentIndexChanged.connect(self._refresh_preview)
@@ -309,12 +435,39 @@ class LinkVisibilityPage(QWidget):
     def _build_track_tab(self) -> QWidget:
         map_card = QWidget()
         map_layout = QVBoxLayout(map_card)
+        heading = QLabel("轨迹地图")
+        heading.setObjectName("toolHeading")
+        map_layout.addWidget(heading)
         self.map_widget = WorldMapWidget()
         self.globe_widget = OrbitGlobeWidget()
         views = QHBoxLayout()
         views.setSpacing(12)
-        ground_map = self._section("二维星下点", self.map_widget)
-        orbit = self._section("三维轨道", self.globe_widget)
+        map_header = QHBoxLayout()
+        map_header.addWidget(QLabel("二维星下点"))
+        map_header.addStretch(1)
+        for text, tooltip, factor in (("−", "缩小二维地图", 0.8), ("+", "放大二维地图", 1.25)):
+            button = QPushButton(text)
+            button.setToolTip(tooltip)
+            button.setAccessibleName(tooltip)
+            button.clicked.connect(lambda _, factor=factor: self.map_widget.zoom_by(factor))
+            map_header.addWidget(button)
+        full_map = QPushButton("全图")
+        full_map.setToolTip("恢复二维地图的默认视角")
+        full_map.clicked.connect(self.map_widget.reset_view)
+        map_header.addWidget(full_map)
+        map_header_widget = QWidget()
+        map_header.setContentsMargins(0, 0, 0, 0)
+        map_header_widget.setLayout(map_header)
+        ground_map = QGroupBox()
+        ground_layout = QVBoxLayout(ground_map)
+        ground_layout.addWidget(map_header_widget)
+        ground_layout.addWidget(self.map_widget, 1)
+        orbit = QGroupBox()
+        orbit_layout = QVBoxLayout(orbit)
+        orbit_title = QLabel("三维轨道")
+        orbit_title.setMinimumHeight(full_map.sizeHint().height())
+        orbit_layout.addWidget(orbit_title)
+        orbit_layout.addWidget(self.globe_widget, 1)
         views.addWidget(ground_map, 1)
         views.addWidget(orbit, 1)
         map_layout.addLayout(views, 1)
@@ -342,7 +495,7 @@ class LinkVisibilityPage(QWidget):
         ctrl.addWidget(self.slider, 1)
         ctrl.addWidget(self.map_status)
         map_layout.addLayout(ctrl)
-        hint = QLabel("三维轨道可拖动旋转、滚轮缩放")
+        hint = QLabel("二维：滚轮缩放、拖动平移      三维：滚轮缩放、拖动旋转")
         hint.setObjectName("hintLabel")
         hint.setAlignment(Qt.AlignmentFlag.AlignRight)
         map_layout.addWidget(hint)
@@ -370,27 +523,31 @@ class LinkVisibilityPage(QWidget):
     def _build_loc_card(self, index: int) -> QWidget:
         st = self._config.stations[index]
         card = QGroupBox(f"地点 {index + 1}")
-        form = QFormLayout(card)
+        form = QGridLayout(card)
+        form.setColumnStretch(0, 1)
+        form.setColumnStretch(1, 1)
 
         name_edit = QLineEdit(st.name)
-        form.addRow("名称", name_edit)
+        form.addWidget(self._field("站点名称", name_edit), 0, 0)
 
         mode_combo = QComboBox()
         mode_combo.addItem("十进制", "decimal")
         mode_combo.addItem("度分秒", "dms")
-        form.addRow("坐标格式", mode_combo)
+        form.addWidget(self._field("坐标格式", mode_combo), 0, 1)
 
         stacked = QStackedWidget()
         # 十进制
         dec_widget = QWidget()
-        dec = QFormLayout(dec_widget)
+        dec = QHBoxLayout(dec_widget)
+        dec.setContentsMargins(0, 0, 0, 0)
         lat_dec = _spin(-90.0, 90.0, st.latitude_deg, 6)
         lon_dec = _spin(-180.0, 180.0, st.longitude_deg, 6)
-        dec.addRow("纬度 (°)", lat_dec)
-        dec.addRow("经度 (°)", lon_dec)
+        dec.addWidget(self._field("纬度（°）", lat_dec), 1)
+        dec.addWidget(self._field("经度（°）", lon_dec), 1)
         # 度分秒
         dms_widget = QWidget()
         dms = QFormLayout(dms_widget)
+        dms.setContentsMargins(0, 0, 0, 0)
         lat_deg = _int_spin(0, 90, int(st.latitude_deg))
         lat_min = _int_spin(0, 59, 0)
         lat_sec = _int_spin(0, 59, 0)
@@ -401,17 +558,17 @@ class LinkVisibilityPage(QWidget):
         dms.addRow("经度 度/分/秒", _three(lon_deg, lon_min, lon_sec))
         stacked.addWidget(dec_widget)
         stacked.addWidget(dms_widget)
-        form.addRow("", stacked)
+        form.addWidget(stacked, 1, 0, 1, 2)
         mode_combo.currentIndexChanged.connect(
             lambda i: stacked.setCurrentIndex(0 if mode_combo.itemData(i) == "decimal" else 1)
         )
         mode_combo.setCurrentIndex(0)
         stacked.setCurrentIndex(0)
 
-        min_el = _spin(0.0, 85.0, st.min_elevation_deg, 2)
-        gso = _spin(0.0, 45.0, st.gso_avoid_deg, 2)
-        form.addRow("最低仰角 (°)", min_el)
-        form.addRow("GSO 隔离角 (°)", gso)
+        min_el = _spin(0.0, 90.0, st.min_elevation_deg, 2)
+        gso = _spin(0.0, 180.0, st.gso_avoid_deg, 2)
+        form.addWidget(self._field("最低仰角（°）", min_el), 2, 0)
+        form.addWidget(self._field("GSO 隔离角（°）", gso), 2, 1)
 
         setattr(self, f"_loc{index}", {
             "name": name_edit, "mode": mode_combo, "stack": stacked,
@@ -422,20 +579,48 @@ class LinkVisibilityPage(QWidget):
         })
         return card
 
-    def _build_compute_bar(self) -> QWidget:
-        card = QGroupBox("计算控制")
+    @staticmethod
+    def _field(title: str, field: QWidget) -> QWidget:
+        widget = QWidget()
+        column = QVBoxLayout(widget)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        label = QLabel(title)
+        label.setObjectName("fieldCaption")
+        label.setBuddy(field)
+        column.addWidget(label)
+        column.addWidget(field)
+        return widget
+
+    def _build_time_card(self) -> QWidget:
+        card = QGroupBox("计算时段（北京时间）")
         layout = QHBoxLayout(card)
-        layout.addWidget(QLabel("开始日期"))
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDate(self.date_edit.date().currentDate())
-        layout.addWidget(self.date_edit)
-        layout.addWidget(QLabel("计算天数"))
-        self.days_spin = QSpinBox()
-        self.days_spin.setRange(1, 8)
-        self.days_spin.setValue(1)
-        layout.addWidget(self.days_spin)
-        self.run_btn = action_button("计算两地通信时长", "play", primary=True)
+        self.start_edit = self._time_edit(self._config.scenario.start_time)
+        self.stop_edit = self._time_edit(self._config.scenario.stop_time)
+        layout.addWidget(self._field("开始时间", self.start_edit), 1)
+        layout.addWidget(self._field("结束时间", self.stop_edit), 1)
+        return card
+
+    @staticmethod
+    def _time_edit(utc_text: str) -> QDateTimeEdit:
+        local = parse_stk_time(utc_text).astimezone(_BEIJING)
+        # Store the displayed wall-clock fields in UTC to avoid the PC's time zone.
+        widget = QDateTimeEdit()
+        widget.setTimeSpec(Qt.TimeSpec.UTC)
+        date = QDate(local.year, local.month, local.day)
+        time = QTime(local.hour, local.minute, local.second)
+        widget.setDateTime(QDateTime(date, time, Qt.TimeSpec.UTC))
+        widget.setCalendarPopup(True)
+        widget.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        return widget
+
+    def _build_compute_bar(self) -> QWidget:
+        card = QWidget()
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(0, 7, 0, 0)
+        self.engine_selection = EngineSelection(self._config.stk)
+        layout.addWidget(self.engine_selection)
+        self.run_btn = action_button("计算建链", "play", primary=True)
         self.run_btn.clicked.connect(lambda: self._emit_run())
         layout.addStretch(1)
         layout.addWidget(self.run_btn)
@@ -445,6 +630,7 @@ class LinkVisibilityPage(QWidget):
     def set_reference_satellite(self, profile) -> None:
         self._config.satellite = SatelliteConfig.from_reference(profile, self._config.satellite.step)
         self._config.tle_file = ""
+        self.satellite_summary.setText(profile.label)
 
     def _read_loc(self, index: int) -> LinkStationConfig:
         loc = getattr(self, f"_loc{index}")
@@ -468,13 +654,39 @@ class LinkVisibilityPage(QWidget):
         cfg = copy.deepcopy(self._config)
         cfg.stations[0] = self._read_loc(0)
         cfg.stations[1] = self._read_loc(1)
-        start = self.date_edit.date().toPython()
-        stop = start + timedelta(days=self.days_spin.value())
-        cfg.scenario.start_time = f"{start:%Y-%m-%d} 00:00:00"
-        cfg.scenario.stop_time = f"{stop:%Y-%m-%d} 00:00:00"
-        cfg.stk.engine = "python"
+        if cfg.stations[0].name.casefold() == cfg.stations[1].name.casefold():
+            QMessageBox.warning(self, "请检查站点", "两个地面站须使用不同的名称。")
+            return
+        start, stop = (
+            field.dateTime().toPython().replace(tzinfo=_BEIJING).astimezone(timezone.utc)
+            for field in (self.start_edit, self.stop_edit)
+        )
+        if not 0 < (stop - start).total_seconds() <= 8 * 86400:
+            QMessageBox.warning(self, "请检查计算时段", "结束时间须晚于开始时间，且计算时段最多为 8 天。")
+            return
+        cfg.scenario.start_time = start.strftime("%Y-%m-%d %H:%M:%S")
+        cfg.scenario.stop_time = stop.strftime("%Y-%m-%d %H:%M:%S")
+        cfg.stk = self.engine_selection.config()
+        cfg.dual_station_sync = True
         self.status_label.setText("正在计算...")
         self.run_requested.emit(cfg, "normal")
+
+    def _request_stk_file(self, action: str) -> None:
+        result = self._last_result
+        if result is None or not result.stk_scenario:
+            return
+        ephemeris = action == "ephemeris"
+        suffix = ".e" if ephemeris else ".sc"
+        title = "导出 STK 星历" if ephemeris else "保存 STK 场景"
+        stem = result.satellite_name if ephemeris else result.stk_scenario
+        filename, _ = QFileDialog.getSaveFileName(self, title, stem + suffix, f"STK 文件 (*{suffix})")
+        if not filename:
+            return
+        path = Path(filename)
+        if path.suffix.lower() != suffix:
+            path = Path(str(path) + suffix)
+        self.set_status(f"正在{title}…")
+        self.stk_file_requested.emit(action, str(path), result.stk_scenario)
 
     def _toggle_play(self) -> None:
         if self._timer.isActive():
@@ -556,23 +768,32 @@ class LinkVisibilityPage(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         self.run_btn.setEnabled(not busy)
+        self.engine_selection.setEnabled(not busy)
+        self.stk_actions.setEnabled(not busy)
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
+        self.status_label.setToolTip(text)
 
     def show_result(self, result: LinkVisibilityResult) -> None:
         self._last_result = result
+        engine_label = {"python": "Python", "stk": "STK 12", "compare": "Python / STK 12"}
+        self.result_engine.setText(f"计算引擎 · {engine_label[result.engine_used]}")
+        self.stk_actions.setVisible(bool(result.stk_scenario))
         self.run_context.setText(f"卫星 {result.satellite_name} · {result.start_time} 至 {result.stop_time}")
         self.run_context.show()
         self.sections.setCurrentIndex(1)
         self._build_downloads(result)
 
-        # 指标卡
-        self.metric_comm_val.setText(str(len(result.windows)))
-        self.metric_dur_val.setText(f"{result.total_duration_sec / 3600.0:.2f} h")
+        self.result_summary.setText(
+            f"两地通信窗口 <b>{len(result.windows)} 个</b>　　"
+            f"累计通信时长 <b>{result.total_duration_sec / 3600.0:.2f} h</b>"
+        )
         p1, p2 = result.station_names[0], result.station_names[1] if len(result.station_names) > 1 else ""
-        self.metric_p1_val.setText(f"{result.station_totals.get(p1, 0.0) / 3600.0:.2f} h")
-        self.metric_p2_val.setText(f"{result.station_totals.get(p2, 0.0) / 3600.0:.2f} h")
+        for group, name in zip(self.station_groups, (p1, p2)):
+            group.setVisible(bool(name))
+            if name:
+                group.setTitle(f"{name} · 累计 {result.station_totals.get(name, 0.0) / 3600.0:.2f} h")
 
         # 窗口表
         _fill_window_table(self.comm_table,

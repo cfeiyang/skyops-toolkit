@@ -6,7 +6,7 @@ QMainWindow, #appRoot, QScrollArea {
     background: #f2f5f8;
 }
 QDialog { background: #ffffff; }
-QFrame#topBar, QFrame#workbenchPanel, QFrame#toolPanel {
+QFrame#topBar, QFrame#toolPanel {
     background: #ffffff;
     border: 1px solid #dde4ec;
     border-radius: 10px;
@@ -28,17 +28,12 @@ QLabel#workbenchStatus[problem="true"] {
 QLabel#connectionStatus[connected="true"] {
     color: #256554;
 }
-QFrame#metricCard, QLabel#gainSummary {
+QLabel#gainSummary, QLabel#linkSummary {
     background: #f7f8fa;
     border: 1px solid #dde4ec;
     border-radius: 8px;
     padding: 6px 9px;
 }
-QLabel#metricValue {
-    font-size: 22px;
-    font-weight: 600;
-}
-QLabel#metricValue[emphasized="true"] { color: #285eb0; }
 QGroupBox {
     background: #ffffff;
     border: 1px solid #dde4ec;
@@ -168,16 +163,7 @@ QPushButton#primaryButton {
 }
 QPushButton#primaryButton:hover { background: #214f96; }
 QPushButton#primaryButton:disabled { background: #dce5ef; color: #5c6d82; border-color: #dce5ef; }
-QFrame#workbenchFooter {
-    background: #f7f8fa;
-    border-top: 1px solid #dde4ec;
-    border-bottom-left-radius: 10px;
-    border-bottom-right-radius: 10px;
-}
 QScrollArea { border: none; }
 QScrollArea#toolScroll, QWidget#toolScrollContent { background: #ffffff; }
-QScrollArea#workbenchScroll, QScrollArea#workbenchScroll > QWidget, QWidget#workbenchBody {
-    background: #f2f5f8;
-}
 QToolBar { border: none; spacing: 4px; }
 QToolBar QToolButton { border: 1px solid transparent; padding: 4px; border-radius: 5px; }

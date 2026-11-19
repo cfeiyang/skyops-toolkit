@@ -35,7 +35,7 @@ echo.
 echo   %SKYOPS_ACCENT%打开工具%SKYOPS_RESET%
 echo     %SKYOPS_ACCENT%[1]%SKYOPS_RESET%  月度项目分配
 echo     %SKYOPS_ACCENT%[2]%SKYOPS_RESET%  SkyOps 仿真桌面
-echo          %SKYOPS_MUTED%全球覆盖 / 建链可见性 / STK 工作台%SKYOPS_RESET%
+echo          %SKYOPS_MUTED%全球覆盖 / 建链可见性%SKYOPS_RESET%
 echo.
 echo   %SKYOPS_ACCENT%打包发布%SKYOPS_RESET%
 echo     %SKYOPS_ACCENT%[3]%SKYOPS_RESET%  SkyOps 仿真桌面版

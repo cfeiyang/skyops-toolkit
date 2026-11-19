@@ -116,6 +116,7 @@ class LinkVisibilityResult:
     station_aer: dict[str, tuple[AERRecord, ...]] = field(default_factory=dict)
     orbit_track: OrbitTrack | None = None
     tle_epoch: str = ""
+    stk_scenario: str = ""
 
     @property
     def total_duration_sec(self) -> float:

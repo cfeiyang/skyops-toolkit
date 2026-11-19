@@ -32,7 +32,7 @@ if ($missing.Count -gt 0) {
     }
 }
 Write-Host "[依赖检查] 全部就绪。" -ForegroundColor Green
-Write-Host "[打包提示] 未安装 STK COM API (agi.stk12) 时，打包过程会自动降级为纯 Python 引擎版本。" -ForegroundColor DarkGray
+Write-Host "[打包提示] 建链支持直接连接 STK 12 Desktop。全球覆盖的 STK 引擎需打包 agi.stk12。" -ForegroundColor DarkGray
 
 Push-Location $projectRoot
 try {
