@@ -3,6 +3,7 @@
 from pathlib import Path
 import math
 import re
+import unicodedata
 
 from skyops_sim.simulations.common import _stk_time, parse_stk_time
 
@@ -17,6 +18,31 @@ def _name(text: str, label: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", text):
         raise ValueError(f"{label}须以英文字母开头，最多 64 个英文字母、数字或下划线。")
     return text
+
+
+def _facility_name(label: str, used: set[str]) -> str:
+    normalized = unicodedata.normalize("NFKC", label)
+    if not normalized.isascii():
+        try:
+            from pypinyin import lazy_pinyin
+        except ModuleNotFoundError as error:
+            raise RuntimeError(
+                "中文站名需要 pypinyin。请用 SkyOps 环境安装项目依赖，或使用打包后的 SkyOpsSim。"
+            ) from error
+        normalized = "".join(
+            part[:1].upper() + part[1:] for part in lazy_pinyin(normalized)
+        )
+    base = re.sub(r"[^A-Za-z0-9_-]+", "_", normalized).strip("_-")
+    if not base or not base[0].isalpha() or base.casefold() in {"end", "default"}:
+        base = f"Station_{base}".rstrip("_")
+    candidate = base[:64]
+    index = 2
+    while candidate.casefold() in used:
+        suffix = f"_{index}"
+        candidate = base[:64 - len(suffix)] + suffix
+        index += 1
+    used.add(candidate.casefold())
+    return candidate
 
 
 def build_scene(name, config, tle, stations):
@@ -36,8 +62,10 @@ def build_scene(name, config, tle, stations):
         f"TimeStep {_number(config.satellite.step)}",
     ]
     facilities = []
-    for index, station in enumerate(stations, 1):
-        facility = f"*/Facility/Station_{index}"
+    station_names: set[str] = set()
+    for station in stations:
+        name_in_stk = _facility_name(station.name, station_names)
+        facility = f"*/Facility/{name_in_stk}"
         facilities.append(facility.removeprefix("*/"))
         if not (-90 <= station.latitude_deg <= 90 and -180 <= station.longitude_deg <= 180):
             raise ValueError(f"站点 {station.name} 的经纬度超出范围。")
@@ -45,7 +73,7 @@ def build_scene(name, config, tle, stations):
             raise ValueError(f"站点 {station.name} 的角度约束超出范围。")
         gso = _number(station.gso_avoid_deg) if station.gso_avoid_deg > 0 else "Off"
         commands.extend((
-            f"New / */Facility Station_{index} CentralBody Earth NoDefault",
+            f"New / */Facility {name_in_stk} CentralBody Earth NoDefault",
             f"SetPosition {facility} Geodetic {_number(station.latitude_deg)} "
             f"{_number(station.longitude_deg)} {_number(station.altitude_m)}",
             f"SetConstraint {facility} ElevationAngle Min {_number(station.min_elevation_deg)} IncludeIntervals",

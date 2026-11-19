@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 
 from skyops_sim.infrastructure.paths import application_root
 from skyops_sim.infrastructure.reference_satellite import ReferenceSatellite
@@ -93,16 +94,19 @@ def _stk_time(value: datetime) -> str:
         "Nov",
         "Dec",
     )
+    fraction = f"{value.microsecond:06d}".rstrip("0").ljust(3, "0")
     return (
         f"{value.day} {months[value.month - 1]} {value.year} "
-        f"{value:%H:%M:%S}.{value.microsecond // 1000:03d}"
+        f"{value:%H:%M:%S}.{fraction}"
     )
 
 
 def parse_stk_time(text: str) -> datetime:
-    """将 STK UTCG 时间字符串 (如 '1 Sep 2026 00:00:00.000') 或 ISO 格式解析为 UTC datetime。"""
-    cleaned = text.strip()
-    for fmt in ("%d %b %Y %H:%M:%S.%f", "%d %b %Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+    """读取 UTCG 或 ISO 时间，将超出 datetime 精度的小数截到微秒。"""
+    cleaned = re.sub(r"(?<=:\d{2}\.\d{6})[0-9]+$", "", text.strip())
+    for fmt in ("%d %b %Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        if "." in cleaned:
+            fmt += ".%f"
         try:
             return datetime.strptime(cleaned, fmt).replace(tzinfo=timezone.utc)
         except ValueError:

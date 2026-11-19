@@ -465,6 +465,7 @@ class LinkVisibilityPage(QWidget):
         orbit = QGroupBox()
         orbit_layout = QVBoxLayout(orbit)
         orbit_title = QLabel("三维轨道")
+        orbit_title.setToolTip("光束表示当前时刻可见的卫星至地面站链路。")
         orbit_title.setMinimumHeight(full_map.sizeHint().height())
         orbit_layout.addWidget(orbit_title)
         orbit_layout.addWidget(self.globe_widget, 1)
@@ -743,12 +744,13 @@ class LinkVisibilityPage(QWidget):
         if index + 1 < len(self._sample_times):
             start, end = self._sample_times[index:index + 2]
             position += (self._elapsed_sec - start) / (end - start)
+        pt = self._last_result.ground_track[index]
         self.map_widget.set_position(position)
-        self.globe_widget.set_position(position)
+        self.globe_widget.set_position(position, (pt.linked1, pt.linked2))
         with QSignalBlocker(self.slider):
             self.slider.setValue(index)
-        pt = self._last_result.ground_track[index]
-        self.map_status.setText(f"{pt.time}　{'通信中' if pt.linked else '未建链'}")
+        status = "两地通信中" if pt.linked else "单站可见" if pt.linked1 or pt.linked2 else "未建链"
+        self.map_status.setText(f"{pt.time}　{status}")
 
     def _set_track(self, result: LinkVisibilityResult) -> None:
         self._timer.stop()

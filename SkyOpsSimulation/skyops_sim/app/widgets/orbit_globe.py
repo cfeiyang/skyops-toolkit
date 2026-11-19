@@ -2,12 +2,12 @@
 
 from functools import lru_cache
 import json
-from math import atan2, cos, radians, sin
+from math import atan2, cos, hypot, radians, sin
 from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 
@@ -79,6 +79,43 @@ def _draw_edges(painter, edges, center, scale, *, front=False):
     painter.drawPath(path)
 
 
+def _draw_link_beam(painter, satellite, station, center, scale, color, *, front):
+    """Draw one depth-clipped half of a tapered link in the station's color."""
+    start_visible = (satellite[2] >= 0) == front
+    end_visible = (station[2] >= 0) == front
+    if not (start_visible or end_visible):
+        return
+    a = center + QPointF(satellite[0], -satellite[1]) * scale
+    b = center + QPointF(station[0], -station[1]) * scale
+    delta = b - a
+    length = hypot(delta.x(), delta.y())
+    if length < 1:
+        return
+    start, end = 0.0, 1.0
+    if start_visible != end_visible:
+        crossing = satellite[2] / (satellite[2] - station[2])
+        if start_visible:
+            end = crossing
+        else:
+            start = crossing
+    normal = QPointF(-delta.y(), delta.x()) / length
+    spread = min(15.0, max(4.0, 0.035 * length))
+    start_point, end_point = a + delta * start, a + delta * end
+    start_width, end_width = normal * (0.7 + spread * start), normal * (0.7 + spread * end)
+    beam = QPainterPath(start_point - start_width)
+    beam.lineTo(end_point - end_width)
+    beam.lineTo(end_point + end_width)
+    beam.lineTo(start_point + start_width)
+    beam.closeSubpath()
+    gradient = QLinearGradient(a, b)
+    glow = QColor(color)
+    glow.setAlpha(42)
+    gradient.setColorAt(0, glow)
+    glow.setAlpha(158)
+    gradient.setColorAt(1, glow)
+    painter.fillPath(beam, gradient)
+
+
 class OrbitGlobeWidget(QWidget):
     """Interactive orthographic projection of the sampled 3D orbit."""
 
@@ -88,6 +125,7 @@ class OrbitGlobeWidget(QWidget):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._orbit = None
         self._position = 0.0
+        self._linked_stations = (False, False)
         self._drag_at = None
         self._azimuth = 0.0
         self._elevation = radians(23)
@@ -101,6 +139,7 @@ class OrbitGlobeWidget(QWidget):
     def set_data(self, orbit, stations, satellite_name):
         self._orbit = orbit
         self._position = 0.0
+        self._linked_stations = (False, False)
         self._stations = tuple(stations[:2])
         self._satellite = satellite_name
         self._zoom = 1.0
@@ -127,8 +166,9 @@ class OrbitGlobeWidget(QWidget):
                 self._orbit_edges = self._orbit_edges[missing[indices[1:] + 1] == missing[indices[:-1]]]
         self.update()
 
-    def set_position(self, position):
+    def set_position(self, position, linked_stations=(False, False)):
         self._position = position
+        self._linked_stations = linked_stations
         self.update()
 
     def _camera(self):
@@ -153,9 +193,20 @@ class OrbitGlobeWidget(QWidget):
             orientation = (1 - fraction) * orbit.inertial_to_earth[start] + fraction * orbit.inertial_to_earth[end]
             satellite = ((1 - fraction) * orbit.inertial_km[start] + fraction * orbit.inertial_km[end]) / EARTH_RADIUS_KM
 
+        earth_view = orientation @ camera.T
+        station_views = self._station_vectors @ earth_view
+        satellite_view = camera @ satellite if satellite is not None and np.isfinite(satellite).all() else None
+        beams = [
+            (station, color)
+            for station, color, linked in zip(station_views, STATION_COLORS, self._linked_stations)
+            if linked and np.isfinite(station).all()
+        ]
         projected_orbit = self._orbit_edges @ camera.T
         painter.setPen(QPen(QColor("#296981"), 1.2))
         _draw_edges(painter, projected_orbit, center, scale)
+        if satellite_view is not None:
+            for station, color in beams:
+                _draw_link_beam(painter, satellite_view, station, center, scale, color, front=False)
 
         light = QPointF(center.x() - 0.38 * scale, center.y() - 0.43 * scale)
         ocean = QRadialGradient(light, 1.65 * scale)
@@ -165,7 +216,6 @@ class OrbitGlobeWidget(QWidget):
         painter.setPen(QPen(QColor("#6194bd"), 1.4))
         painter.drawEllipse(center, scale, scale)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        earth_view = orientation @ camera.T
         graticule, outline, detailed_outline = _earth_lines()
         painter.setPen(QPen(QColor("#3b6482"), 0.7))
         _draw_edges(painter, graticule @ earth_view, center, scale, front=True)
@@ -174,8 +224,11 @@ class OrbitGlobeWidget(QWidget):
         _draw_edges(painter, coastline @ earth_view, center, scale, front=True)
         painter.setPen(QPen(QColor("#22d3ee"), 1.65))
         _draw_edges(painter, projected_orbit, center, scale, front=True)
+        if satellite_view is not None:
+            for station, color in beams:
+                _draw_link_beam(painter, satellite_view, station, center, scale, color, front=True)
 
-        for station, (x, y, depth), color in zip(self._stations, self._station_vectors @ earth_view, STATION_COLORS):
+        for station, (x, y, depth), color in zip(self._stations, station_views, STATION_COLORS):
             if depth >= 0:
                 point = QPointF(center.x() + scale * x, center.y() - scale * y)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -185,8 +238,8 @@ class OrbitGlobeWidget(QWidget):
                     painter.setPen(QColor(color))
                     painter.drawText(point + QPointF(8, -5), station.name)
 
-        if satellite is not None and np.isfinite(satellite).all():
-            x, y, depth = camera @ satellite
+        if satellite_view is not None:
+            x, y, depth = satellite_view
             if depth >= 0 or x * x + y * y >= 1:
                 point = QPointF(center.x() + scale * x, center.y() - scale * y)
                 painter.setPen(QPen(QColor("#674c16"), 2))

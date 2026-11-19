@@ -16,7 +16,7 @@ Write-Host ("[依赖检查] 使用 Python: " + $py) -ForegroundColor Cyan
 Write-Host "[依赖检查] 正在检查打包所需模块..." -ForegroundColor Cyan
 $required = @(
     "numpy", "pandas", "scipy", "matplotlib", "PySide6",
-    "mpl_toolkits.basemap", "skyfield", "sgp4", "PyInstaller"
+    "mpl_toolkits.basemap", "skyfield", "sgp4", "pypinyin", "PyInstaller"
 )
 $missing = @()
 foreach ($module in $required) {
@@ -25,7 +25,7 @@ foreach ($module in $required) {
 if ($missing.Count -gt 0) {
     Write-Host ("[依赖检查] 缺少: " + ($missing -join ", ")) -ForegroundColor Yellow
     Write-Host "[依赖检查] 正在通过 pip 安装..." -ForegroundColor Yellow
-    & $py -m pip install numpy "scipy<2.0" matplotlib "PySide6>=6.5,<7.0" basemap skyfield sgp4 pyinstaller
+    & $py -m pip install numpy "scipy<2.0" matplotlib "PySide6>=6.5,<7.0" basemap skyfield sgp4 "pypinyin>=0.55,<1.0" pyinstaller
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[依赖检查] 安装失败，请检查网络或 Python 环境后重试。" -ForegroundColor Red
         exit 1
