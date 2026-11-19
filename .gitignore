@@ -38,8 +38,7 @@ results/
 
 # ================= 各项目本地数据目录 =================
 MPAM/data/
-SatLog/data/
-STKSimulation/**/data/
+/SkyOpsSimulation/data/
 
 # ================= 机密 / 日志 / 锁文件 =================
 config.json

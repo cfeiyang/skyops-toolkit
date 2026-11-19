@@ -20,7 +20,7 @@
 
 ## 打包
 
-在 `SkyOpsToolkit.cmd` 菜单输入 `5` 后按回车打包月度项目分配，生成 `dist/月度项目分配.exe`。开发环境需要在 `SkyOps` 中安装运行依赖和 PyInstaller：
+在 `SkyOpsToolkit.cmd` 菜单输入 `4` 后按回车打包月度项目分配，生成 `dist/月度项目分配.exe`。开发环境需要在 `SkyOps` 中安装运行依赖和 PyInstaller：
 
 ```powershell
 conda activate SkyOps

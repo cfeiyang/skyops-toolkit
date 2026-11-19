@@ -12,61 +12,64 @@ if not defined SKYOPS_PYTHON (
 if not defined SKYOPS_PYTHON call :find_python "D:\Anaconda3\envs\SkyOps"
 if not defined SKYOPS_PYTHON call :find_python "D:\Software\Anaconda3\envs\SkyOps"
 
+
+set "SKYOPS_ACCENT="
+set "SKYOPS_MUTED="
+set "SKYOPS_RESET="
+if defined WT_SESSION (
+    for /f "tokens=1,2 delims=+" %%E in ('echo prompt $E+SkyOpsAnsi+^| cmd.exe /d /q') do if "%%F"=="SkyOpsAnsi" (
+        set "SKYOPS_ACCENT=%%E[96m"
+        set "SKYOPS_MUTED=%%E[90m"
+        set "SKYOPS_RESET=%%E[0m"
+    )
+)
+
 :MENU
 title SkyOps 工具箱
 cls
 color 0F
 echo.
-echo   ############################################################
-echo                   S K Y O P S   /   工具箱
-echo   ############################################################
+echo   %SKYOPS_ACCENT%SkyOps%SKYOPS_RESET%  工具箱
+echo   %SKYOPS_MUTED%------------------------------------------------%SKYOPS_RESET%
 echo.
-echo   #### 打开工具 ####
+echo   %SKYOPS_ACCENT%打开工具%SKYOPS_RESET%
+echo     %SKYOPS_ACCENT%[1]%SKYOPS_RESET%  月度项目分配
+echo     %SKYOPS_ACCENT%[2]%SKYOPS_RESET%  SkyOps 仿真桌面
+echo          %SKYOPS_MUTED%全球覆盖 / 建链可见性 / STK 工作台%SKYOPS_RESET%
 echo.
-echo   ## [1] ##   月度项目分配
-echo   ## [2] ##   卫星试验记录
-echo   ## [3] ##   SkyOps 仿真桌面
-echo               全球覆盖 / 建链可见性 / STK 工作台
+echo   %SKYOPS_ACCENT%打包发布%SKYOPS_RESET%
+echo     %SKYOPS_ACCENT%[3]%SKYOPS_RESET%  SkyOps 仿真桌面版
+echo     %SKYOPS_ACCENT%[4]%SKYOPS_RESET%  月度项目分配
 echo.
-echo   #### 打包发布 ####
+echo   %SKYOPS_MUTED%------------------------------------------------%SKYOPS_RESET%
+echo     %SKYOPS_ACCENT%[0]%SKYOPS_RESET%  退出
 echo.
-echo   ## [4] ##   打包 SkyOps 仿真桌面版
-echo   ## [5] ##   打包月度项目分配
-echo.
-echo   ## [0] ##   退出
-echo.
-echo   ############################################################
 :READ_OPTION
 set "SKYOPS_SELECTION="
-set /p "SKYOPS_SELECTION=请输入编号 [1/2/3/4/5/0] 后按回车："
+set /p "SKYOPS_SELECTION=　输入编号并按回车： "
 if not defined SKYOPS_SELECTION goto READ_OPTION
 call :parse_selection
-if errorlevel 6 goto INVALID_OPTION
-if errorlevel 5 goto BUILD_MPAM
-if errorlevel 4 goto BUILD_SIM
-if errorlevel 3 goto SIM
-if errorlevel 2 goto SAT
+if errorlevel 5 goto INVALID_OPTION
+if errorlevel 4 goto BUILD_MPAM
+if errorlevel 3 goto BUILD_SIM
+if errorlevel 2 goto SIM
 if errorlevel 1 goto MPAM
 exit /b 0
 
 :INVALID_OPTION
-echo 编号无效，请重新输入。
+echo   请选择 1、2、3、4 或 0。
 goto READ_OPTION
 
 :MPAM
 call "%~dp0MPAM\MPAM.cmd"
 goto MENU
 
-:SAT
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0SatLog\scripts\start_skyops.ps1"
-goto MENU
-
 :SIM
 call :require_python
 if errorlevel 1 goto MENU
 setlocal
-set "PYTHONPATH=%~dp0STKSimulation\GlobalCommunicationSimulation\src"
-"%SKYOPS_PYTHON%" -s -B -X utf8 -m stk_simulation
+set "PYTHONPATH=%~dp0SkyOpsSimulation"
+"%SKYOPS_PYTHON%" -s -B -X utf8 -m skyops_sim
 if errorlevel 1 pause
 endlocal
 goto MENU
@@ -74,7 +77,7 @@ goto MENU
 :BUILD_SIM
 call :require_python
 if errorlevel 1 goto MENU
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0STKSimulation\GlobalCommunicationSimulation\packaging\build.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0SkyOpsSimulation\packaging\build.ps1"
 pause
 goto MENU
 
@@ -99,11 +102,11 @@ exit /b
 
 :parse_selection
 setlocal EnableDelayedExpansion
-for %%N in (0 1 2 3 4 5) do (
+for %%N in (0 1 2 3 4) do (
     if "!SKYOPS_SELECTION!"=="%%N" (
         endlocal
         exit /b %%N
     )
 )
 endlocal
-exit /b 6
+exit /b 5

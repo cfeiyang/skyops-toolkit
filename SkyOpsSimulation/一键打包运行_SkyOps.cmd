@@ -1,0 +1,48 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+chcp 936 >nul
+set "PY=%SKYOPS_PYTHON%"
+if defined CONDA_PREFIX if not exist "%PY%" (
+    for %%D in ("%CONDA_PREFIX%") do if /i "%%~nxD"=="SkyOps" set "PY=%%~fD\python.exe"
+)
+if not exist "%PY%" set "PY=D:\Software\Anaconda3\envs\SkyOps\python.exe"
+if not exist "%PY%" set "PY=D:\Anaconda3\envs\SkyOps\python.exe"
+if not exist "%PY%" set "PY=python"
+set "SKYOPS_PYTHON=%PY%"
+
+:MENU
+cls
+echo ==================================================
+echo    SkyOps 仿真平台 —— 一键工具
+echo ==================================================
+echo    [1] 直接运行（源码，免打包）
+echo    [2] 打包编译（生成 SkyOpsSim.exe，不运行）
+echo    [0] 退出
+echo ==================================================
+set /p choice=请输入选项 (1/2/0): 
+
+if "%choice%"=="1" goto RUN
+if "%choice%"=="2" goto BUILD
+if "%choice%"=="0" exit /b 0
+echo 无效选项，请重新输入。
+timeout /t 1 >nul
+goto MENU
+
+:RUN
+echo 正在从源码启动 SkyOps ...
+set "PYTHONPATH=%~dp0"
+"%PY%" -s -B -X utf8 -m skyops_sim
+if errorlevel 1 (
+    echo.
+    echo 启动失败。请确认 skyops 环境已安装依赖。
+    pause
+)
+goto MENU
+
+:BUILD
+echo 正在调用打包脚本 build.ps1 ...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\build.ps1"
+echo 打包完成，产物在 dist\SkyOpsSim.exe
+timeout /t 1 >nul
+goto MENU
