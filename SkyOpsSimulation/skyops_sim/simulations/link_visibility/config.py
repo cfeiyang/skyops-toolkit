@@ -21,7 +21,7 @@ from skyops_sim.simulations.common import (
 
 @dataclass
 class LinkStationConfig:
-    name: str = "上海临港站"
+    name: str = "海事站"
     latitude_deg: float = 30.903611
     longitude_deg: float = 121.919444
     altitude_m: float = 0.0
@@ -137,7 +137,7 @@ def default_link_visibility_config() -> LinkVisibilityConfig:
         satellite=SatelliteConfig.from_reference(ReferenceSatellite(), step=30.0),
         stations=[
             LinkStationConfig(
-                name="上海临港站",
+                name="海事站",
                 latitude_deg=30.903611,
                 longitude_deg=121.919444,
                 altitude_m=0.0,

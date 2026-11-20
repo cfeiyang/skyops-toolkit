@@ -18,7 +18,7 @@ class StationPreset:
 def _built_in_presets() -> tuple[StationPreset, ...]:
     stations = {station.name: station for station in station_template("domestic")}
     return (
-        StationPreset("上海临港站", stations["LinGang"].lat, stations["LinGang"].lon),
+        StationPreset("海事站", stations["LinGang"].lat, stations["LinGang"].lon),
         StationPreset("喀什站", stations["KaShi"].lat, stations["KaShi"].lon),
     )
 
@@ -45,7 +45,17 @@ def load_station_presets() -> tuple[StationPreset, ...]:
             continue
         if name and -90 <= lat <= 90 and -180 <= lon <= 180:
             custom.append(StationPreset(name, lat, lon))
-    return built_in + tuple(sorted(custom, key=lambda station: station.name.casefold()))
+    presets = list(built_in)
+    names = {preset.name.casefold() for preset in presets}
+    for preset in sorted(custom, key=lambda station: station.name.casefold()):
+        label = preset.name
+        suffix = 2
+        while label.casefold() in names:
+            label = f"{preset.name}（{suffix}）"
+            suffix += 1
+        presets.append(StationPreset(label, preset.latitude_deg, preset.longitude_deg))
+        names.add(label.casefold())
+    return tuple(presets)
 
 
 def save_station_preset(preset: StationPreset) -> None:
@@ -57,7 +67,7 @@ def save_station_preset(preset: StationPreset) -> None:
     # Separate settings keys let different names be saved by separate instances.
     key = sha256(normalized.encode("utf-8")).hexdigest()
     settings = _presets_settings()
-    if settings.contains(key) or any(p.name.casefold() == normalized for p in _built_in_presets()):
+    if settings.contains(key) or any(p.name.casefold() == normalized for p in load_station_presets()):
         raise ValueError("已有同名预设，请换一个站点名称。")
     settings.setValue(key, {
         "name": preset.name,

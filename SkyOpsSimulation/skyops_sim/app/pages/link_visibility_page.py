@@ -539,15 +539,11 @@ class LinkVisibilityPage(QWidget):
         form = QGridLayout(card)
         form.setColumnStretch(0, 1)
         form.setColumnStretch(1, 1)
-        form.setRowStretch(4, 1)
-
-        name_edit = QLineEdit(st.name)
-        form.addWidget(self._field("站点名称", name_edit), 1, 0)
 
         mode_combo = QComboBox()
         mode_combo.addItem("十进制", "decimal")
         mode_combo.addItem("度分秒", "dms")
-        form.addWidget(self._field("坐标格式", mode_combo), 1, 1)
+        form.addWidget(self._field("坐标格式", mode_combo), 0, 1)
 
         latitude = CoordinateInput(True, st.latitude_deg)
         longitude = CoordinateInput(False, st.longitude_deg)
@@ -556,7 +552,7 @@ class LinkVisibilityPage(QWidget):
         rows.setContentsMargins(0, 0, 0, 0)
         rows.addRow("纬度", latitude)
         rows.addRow("经度", longitude)
-        form.addWidget(coordinates, 2, 0, 1, 2)
+        form.addWidget(coordinates, 1, 0, 1, 2)
 
         def update_format() -> None:
             dms = mode_combo.currentData() == "dms"
@@ -567,13 +563,16 @@ class LinkVisibilityPage(QWidget):
 
         preset_combo = None
         if index == 0:
-            preset_row, preset_combo = self._build_station_picker(st, name_edit, latitude, longitude, coordinates)
-            form.addWidget(preset_row, 0, 0, 1, 2)
+            name_field, preset_combo = self._build_station_picker(st, latitude, longitude, coordinates)
+            name_edit = preset_combo.lineEdit()
+        else:
+            name_field = name_edit = QLineEdit(st.name)
+        form.addWidget(self._field("站点名称", name_field), 0, 0)
 
         min_el = _spin(0.0, 90.0, st.min_elevation_deg, 2)
         gso = _spin(0.0, 180.0, st.gso_avoid_deg, 2)
-        form.addWidget(self._field("最低仰角（°）", min_el), 3, 0)
-        form.addWidget(self._field("GSO 隔离角（°）", gso), 3, 1)
+        form.addWidget(self._field("最低仰角（°）", min_el), 2, 0)
+        form.addWidget(self._field("GSO 隔离角（°）", gso), 2, 1)
 
         setattr(self, f"_loc{index}", {
             "name": name_edit, "preset": preset_combo, "mode": mode_combo,
@@ -583,45 +582,55 @@ class LinkVisibilityPage(QWidget):
         return card
 
     def _build_station_picker(
-        self, st: LinkStationConfig, name_edit: QLineEdit,
+        self, st: LinkStationConfig,
         latitude: CoordinateInput, longitude: CoordinateInput, coordinates: QWidget,
     ) -> tuple[QWidget, QComboBox]:
         widget = QWidget()
         row = QHBoxLayout(widget)
         row.setContentsMargins(0, 0, 0, 0)
-        label = QLabel("地面站预设")
-        label.setObjectName("fieldCaption")
         combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.setCompleter(None)
+        combo.setAccessibleName("地点 1 站点名称与预设")
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(10)
+        combo.setMinimumContentsLength(8)
         combo.addItem("自定义")
         for preset in load_station_presets():
             combo.addItem(preset.name, preset)
-        label.setBuddy(combo)
-        save_button = action_button("保存为预设", "plus")
-        save_button.setToolTip("保存这次填写的站点名称和经纬度")
-        row.addWidget(label)
+        name_edit = combo.lineEdit()
+        widget.setFocusProxy(combo)
+        save_button = action_button("", "plus")
+        save_button.setAccessibleName("保存为预设")
+        save_button.setToolTip("保存为预设")
         row.addWidget(combo, 1)
         row.addWidget(save_button)
 
-        custom = st.name, st.latitude_deg, st.longitude_deg
+        custom_name = st.name
+        custom_coordinates = st.latitude_deg, st.longitude_deg
+
+        def remember_custom_name(text: str) -> None:
+            nonlocal custom_name
+            # Qt puts the item text in the editor before announcing selection changes.
+            if combo.currentIndex() == 0 and text != combo.itemText(0):
+                custom_name = text
 
         def apply_preset() -> None:
-            nonlocal custom
+            nonlocal custom_coordinates
             preset = combo.currentData()
             if preset is not None:
                 if not name_edit.isReadOnly():
-                    custom = name_edit.text(), latitude.value(), longitude.value()
+                    custom_coordinates = latitude.value(), longitude.value()
                 values = preset.name, preset.latitude_deg, preset.longitude_deg
             else:
-                values = custom
+                values = custom_name, *custom_coordinates
             name, lat, lon = values
-            name_edit.setText(name)
+            combo.setEditText(name)
             name_edit.setReadOnly(preset is not None)
             coordinates.setEnabled(preset is None)
             latitude.set_value(lat)
             longitude.set_value(lon)
-            save_button.setEnabled(preset is None)
+            save_button.setVisible(preset is None)
 
         def save_current() -> None:
             preset = StationPreset(name_edit.text().strip(), latitude.value(), longitude.value())
@@ -634,8 +643,15 @@ class LinkVisibilityPage(QWidget):
             combo.setCurrentIndex(combo.count() - 1)
             self.set_status(f"已保存站点预设「{preset.name}」")
 
+        def reselect_custom(index: int) -> None:
+            if index == 0:
+                combo.setEditText(custom_name)
+
         save_button.clicked.connect(save_current)
+        combo.editTextChanged.connect(remember_custom_name)
         combo.currentIndexChanged.connect(apply_preset)
+        combo.activated.connect(reselect_custom)
+        apply_preset()
         for i in range(1, combo.count()):
             preset = combo.itemData(i)
             if (
@@ -706,7 +722,7 @@ class LinkVisibilityPage(QWidget):
         combo = loc["preset"]
         preset = combo.currentData() if combo is not None else None
         return LinkStationConfig(
-            name=loc["name"].text().strip() or st.name,
+            name=preset.name if preset else loc["name"].text().strip() or st.name,
             latitude_deg=preset.latitude_deg if preset else loc["latitude"].value(),
             longitude_deg=preset.longitude_deg if preset else loc["longitude"].value(),
             altitude_m=st.altitude_m,
