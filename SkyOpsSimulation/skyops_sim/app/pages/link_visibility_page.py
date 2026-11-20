@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from skyops_sim.app.aer_export import build_aer_groups, write_aer_csv, write_aer_pdf
 from skyops_sim.app.icons import action_button, apply_icon
+from skyops_sim.app.link_station_presets import StationPreset, load_station_presets, save_station_preset
 from skyops_sim.app.widgets.coordinate_input import CoordinateInput
 from skyops_sim.app.widgets.engine_selection import EngineSelection
 from skyops_sim.app.widgets.orbit_globe import (
@@ -47,7 +48,6 @@ from skyops_sim.app.widgets.orbit_globe import (
 )
 from skyops_sim.app.widgets.side_navigation import SideNavigation
 from skyops_sim.simulations.common import SatelliteConfig, parse_stk_time
-from skyops_sim.simulations.global_coverage.presets import station_template
 from skyops_sim.simulations.link_visibility.config import (
     LinkStationConfig,
     LinkVisibilityConfig,
@@ -251,6 +251,17 @@ class WorldMapWidget(QWidget):
 
 
 _WINDOW_METRIC_COLUMNS = (3, 4)
+_WINDOW_HEADERS = ("序号", "开始", "结束", "时长（小时）", "最高仰角（°）")
+
+
+def _hours(seconds: float) -> str:
+    value = seconds / 3600
+    return f"{value:.6f}" if 0 < value < 0.0005 else f"{value:.3f}"
+
+
+def _window_row(window) -> tuple:
+    return (window.access_number, window.start_time, window.stop_time,
+            _hours(window.duration_sec), f"{window.max_elevation_deg:.2f}")
 
 
 def _fill_window_table(table: QTableWidget, headers: tuple[str, ...], rows) -> None:
@@ -316,8 +327,8 @@ class LinkVisibilityPage(QWidget):
         parameters.addLayout(heading)
         parameters.addWidget(self._build_time_card())
         loc_row = QHBoxLayout()
-        loc_row.addWidget(self._build_loc_card(0))
-        loc_row.addWidget(self._build_loc_card(1))
+        loc_row.addWidget(self._build_loc_card(0), 1)
+        loc_row.addWidget(self._build_loc_card(1), 1)
         parameters.addLayout(loc_row)
         parameters.addWidget(self._build_compute_bar())
         parameters.addStretch(1)
@@ -528,21 +539,15 @@ class LinkVisibilityPage(QWidget):
         form = QGridLayout(card)
         form.setColumnStretch(0, 1)
         form.setColumnStretch(1, 1)
-
-        preset_combo = QComboBox()
-        preset_combo.addItem("自定义")
-        presets = {station.name: station for station in station_template("domestic")}
-        for key, label in (("LinGang", "上海临港站"), ("KaShi", "喀什站")):
-            preset_combo.addItem(label, presets[key])
-        form.addWidget(self._field("地面站预设", preset_combo), 0, 0)
+        form.setRowStretch(4, 1)
 
         name_edit = QLineEdit(st.name)
-        form.addWidget(self._field("站点名称", name_edit), 1, 0, 1, 2)
+        form.addWidget(self._field("站点名称", name_edit), 1, 0)
 
         mode_combo = QComboBox()
         mode_combo.addItem("十进制", "decimal")
         mode_combo.addItem("度分秒", "dms")
-        form.addWidget(self._field("坐标格式", mode_combo), 0, 1)
+        form.addWidget(self._field("坐标格式", mode_combo), 1, 1)
 
         latitude = CoordinateInput(True, st.latitude_deg)
         longitude = CoordinateInput(False, st.longitude_deg)
@@ -560,34 +565,10 @@ class LinkVisibilityPage(QWidget):
 
         mode_combo.currentIndexChanged.connect(update_format)
 
-        custom = st.name, st.latitude_deg, st.longitude_deg
-
-        def apply_preset() -> None:
-            nonlocal custom
-            preset = preset_combo.currentData()
-            if preset is not None:
-                if not name_edit.isReadOnly():
-                    custom = name_edit.text(), latitude.value(), longitude.value()
-                values = preset_combo.currentText(), preset.lat, preset.lon
-            else:
-                values = custom
-            name, lat, lon = values
-            name_edit.setText(name)
-            name_edit.setReadOnly(preset is not None)
-            coordinates.setEnabled(preset is None)
-            latitude.set_value(lat)
-            longitude.set_value(lon)
-
-        preset_combo.currentIndexChanged.connect(apply_preset)
-        for i in range(1, preset_combo.count()):
-            preset = preset_combo.itemData(i)
-            if (
-                st.name == preset_combo.itemText(i)
-                and isclose(st.latitude_deg, preset.lat, abs_tol=5e-7)
-                and isclose(st.longitude_deg, preset.lon, abs_tol=5e-7)
-            ):
-                preset_combo.setCurrentIndex(i)
-                break
+        preset_combo = None
+        if index == 0:
+            preset_row, preset_combo = self._build_station_picker(st, name_edit, latitude, longitude, coordinates)
+            form.addWidget(preset_row, 0, 0, 1, 2)
 
         min_el = _spin(0.0, 90.0, st.min_elevation_deg, 2)
         gso = _spin(0.0, 180.0, st.gso_avoid_deg, 2)
@@ -600,6 +581,71 @@ class LinkVisibilityPage(QWidget):
             "min_el": min_el, "gso": gso,
         })
         return card
+
+    def _build_station_picker(
+        self, st: LinkStationConfig, name_edit: QLineEdit,
+        latitude: CoordinateInput, longitude: CoordinateInput, coordinates: QWidget,
+    ) -> tuple[QWidget, QComboBox]:
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        label = QLabel("地面站预设")
+        label.setObjectName("fieldCaption")
+        combo = QComboBox()
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(10)
+        combo.addItem("自定义")
+        for preset in load_station_presets():
+            combo.addItem(preset.name, preset)
+        label.setBuddy(combo)
+        save_button = action_button("保存为预设", "plus")
+        save_button.setToolTip("保存这次填写的站点名称和经纬度")
+        row.addWidget(label)
+        row.addWidget(combo, 1)
+        row.addWidget(save_button)
+
+        custom = st.name, st.latitude_deg, st.longitude_deg
+
+        def apply_preset() -> None:
+            nonlocal custom
+            preset = combo.currentData()
+            if preset is not None:
+                if not name_edit.isReadOnly():
+                    custom = name_edit.text(), latitude.value(), longitude.value()
+                values = preset.name, preset.latitude_deg, preset.longitude_deg
+            else:
+                values = custom
+            name, lat, lon = values
+            name_edit.setText(name)
+            name_edit.setReadOnly(preset is not None)
+            coordinates.setEnabled(preset is None)
+            latitude.set_value(lat)
+            longitude.set_value(lon)
+            save_button.setEnabled(preset is None)
+
+        def save_current() -> None:
+            preset = StationPreset(name_edit.text().strip(), latitude.value(), longitude.value())
+            try:
+                save_station_preset(preset)
+            except (ValueError, OSError) as error:
+                QMessageBox.warning(self, "无法保存预设", str(error))
+                return
+            combo.addItem(preset.name, preset)
+            combo.setCurrentIndex(combo.count() - 1)
+            self.set_status(f"已保存站点预设「{preset.name}」")
+
+        save_button.clicked.connect(save_current)
+        combo.currentIndexChanged.connect(apply_preset)
+        for i in range(1, combo.count()):
+            preset = combo.itemData(i)
+            if (
+                st.name == preset.name
+                and isclose(st.latitude_deg, preset.latitude_deg, abs_tol=5e-7)
+                and isclose(st.longitude_deg, preset.longitude_deg, abs_tol=5e-7)
+            ):
+                combo.setCurrentIndex(i)
+                break
+        return widget, combo
 
     @staticmethod
     def _field(title: str, field: QWidget) -> QWidget:
@@ -657,11 +703,12 @@ class LinkVisibilityPage(QWidget):
     def _read_loc(self, index: int) -> LinkStationConfig:
         loc = getattr(self, f"_loc{index}")
         st = self._config.stations[index]
-        preset = loc["preset"].currentData()
+        combo = loc["preset"]
+        preset = combo.currentData() if combo is not None else None
         return LinkStationConfig(
             name=loc["name"].text().strip() or st.name,
-            latitude_deg=preset.lat if preset else loc["latitude"].value(),
-            longitude_deg=preset.lon if preset else loc["longitude"].value(),
+            latitude_deg=preset.latitude_deg if preset else loc["latitude"].value(),
+            longitude_deg=preset.longitude_deg if preset else loc["longitude"].value(),
             altitude_m=st.altitude_m,
             min_elevation_deg=loc["min_el"].value(),
             gso_avoid_deg=loc["gso"].value(),
@@ -805,18 +852,18 @@ class LinkVisibilityPage(QWidget):
 
         self.result_summary.setText(
             f"两地通信窗口 <b>{len(result.windows)} 个</b>　　"
-            f"累计通信时长 <b>{result.total_duration_sec / 3600.0:.2f} h</b>"
+            f"累计通信时长 <b>{_hours(result.total_duration_sec)} 小时</b>"
         )
         p1, p2 = result.station_names[0], result.station_names[1] if len(result.station_names) > 1 else ""
         for group, name in zip(self.station_groups, (p1, p2)):
             group.setVisible(bool(name))
             if name:
-                group.setTitle(f"{name} · 累计 {result.station_totals.get(name, 0.0) / 3600.0:.2f} h")
+                group.setTitle(f"{name} · 累计 {_hours(result.station_totals.get(name, 0.0))} 小时")
 
         # 窗口表
         _fill_window_table(self.comm_table,
-                    ("序号", "开始", "结束", "时长(秒)", "最高仰角(°)", "峰值时刻"),
-                    [(w.access_number, w.start_time, w.stop_time, f"{w.duration_sec:.1f}", f"{w.max_elevation_deg:.2f}", w.max_elevation_time) for w in result.windows])
+                    (*_WINDOW_HEADERS, "峰值时刻"),
+                    [(*_window_row(w), w.max_elevation_time) for w in result.windows])
         self._fill_station_table(self.p1_table, p1)
         self._fill_station_table(self.p2_table, p2)
         self._reflow_station_tables(self.station_tables.width())
@@ -824,15 +871,14 @@ class LinkVisibilityPage(QWidget):
         # 地图动画
         self._set_track(result)
 
-        self.set_status(f"计算完成：两地 {len(result.windows)} 个窗口，累计 {result.total_duration_sec / 3600.0:.2f} h")
+        self.set_status(f"计算完成：两地 {len(result.windows)} 个窗口，累计 {_hours(result.total_duration_sec)} 小时")
 
     def _fill_station_table(self, table: QTableWidget, name: str) -> None:
         if not self._last_result:
             return
         windows = self._last_result.station_windows.get(name, ())
         _fill_window_table(table,
-                    ("序号", "开始", "结束", "时长(秒)", "最高仰角(°)"),
-                    [(w.access_number, w.start_time, w.stop_time, f"{w.duration_sec:.1f}", f"{w.max_elevation_deg:.2f}") for w in windows])
+                           _WINDOW_HEADERS, [_window_row(w) for w in windows])
 
     def _reflow_station_tables(self, width: int) -> None:
         panel_widths = []
