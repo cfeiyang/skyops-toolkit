@@ -7,7 +7,7 @@ import copy
 from datetime import datetime, timezone
 from functools import lru_cache
 from itertools import chain, islice
-from math import isfinite
+from math import isclose, isfinite
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
-    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -41,12 +40,14 @@ from PySide6.QtWidgets import (
 
 from skyops_sim.app.aer_export import build_aer_groups, write_aer_csv, write_aer_pdf
 from skyops_sim.app.icons import action_button, apply_icon
+from skyops_sim.app.widgets.coordinate_input import CoordinateInput
 from skyops_sim.app.widgets.engine_selection import EngineSelection
 from skyops_sim.app.widgets.orbit_globe import (
     OrbitGlobeWidget, SATELLITE_COLOR, SPACE_COLOR, STATION_COLORS, world_rings,
 )
 from skyops_sim.app.widgets.side_navigation import SideNavigation
 from skyops_sim.simulations.common import SatelliteConfig, parse_stk_time
+from skyops_sim.simulations.global_coverage.presets import station_template
 from skyops_sim.simulations.link_visibility.config import (
     LinkStationConfig,
     LinkVisibilityConfig,
@@ -528,54 +529,74 @@ class LinkVisibilityPage(QWidget):
         form.setColumnStretch(0, 1)
         form.setColumnStretch(1, 1)
 
+        preset_combo = QComboBox()
+        preset_combo.addItem("自定义")
+        presets = {station.name: station for station in station_template("domestic")}
+        for key, label in (("LinGang", "上海临港站"), ("KaShi", "喀什站")):
+            preset_combo.addItem(label, presets[key])
+        form.addWidget(self._field("地面站预设", preset_combo), 0, 0)
+
         name_edit = QLineEdit(st.name)
-        form.addWidget(self._field("站点名称", name_edit), 0, 0)
+        form.addWidget(self._field("站点名称", name_edit), 1, 0, 1, 2)
 
         mode_combo = QComboBox()
         mode_combo.addItem("十进制", "decimal")
         mode_combo.addItem("度分秒", "dms")
         form.addWidget(self._field("坐标格式", mode_combo), 0, 1)
 
-        stacked = QStackedWidget()
-        # 十进制
-        dec_widget = QWidget()
-        dec = QHBoxLayout(dec_widget)
-        dec.setContentsMargins(0, 0, 0, 0)
-        lat_dec = _spin(-90.0, 90.0, st.latitude_deg, 6)
-        lon_dec = _spin(-180.0, 180.0, st.longitude_deg, 6)
-        dec.addWidget(self._field("纬度（°）", lat_dec), 1)
-        dec.addWidget(self._field("经度（°）", lon_dec), 1)
-        # 度分秒
-        dms_widget = QWidget()
-        dms = QFormLayout(dms_widget)
-        dms.setContentsMargins(0, 0, 0, 0)
-        lat_deg = _int_spin(0, 90, int(st.latitude_deg))
-        lat_min = _int_spin(0, 59, 0)
-        lat_sec = _int_spin(0, 59, 0)
-        lon_deg = _int_spin(0, 180, int(st.longitude_deg))
-        lon_min = _int_spin(0, 59, 0)
-        lon_sec = _int_spin(0, 59, 0)
-        dms.addRow("纬度 度/分/秒", _three(lat_deg, lat_min, lat_sec))
-        dms.addRow("经度 度/分/秒", _three(lon_deg, lon_min, lon_sec))
-        stacked.addWidget(dec_widget)
-        stacked.addWidget(dms_widget)
-        form.addWidget(stacked, 1, 0, 1, 2)
-        mode_combo.currentIndexChanged.connect(
-            lambda i: stacked.setCurrentIndex(0 if mode_combo.itemData(i) == "decimal" else 1)
-        )
-        mode_combo.setCurrentIndex(0)
-        stacked.setCurrentIndex(0)
+        latitude = CoordinateInput(True, st.latitude_deg)
+        longitude = CoordinateInput(False, st.longitude_deg)
+        coordinates = QWidget()
+        rows = QFormLayout(coordinates)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.addRow("纬度", latitude)
+        rows.addRow("经度", longitude)
+        form.addWidget(coordinates, 2, 0, 1, 2)
+
+        def update_format() -> None:
+            dms = mode_combo.currentData() == "dms"
+            latitude.set_dms(dms)
+            longitude.set_dms(dms)
+
+        mode_combo.currentIndexChanged.connect(update_format)
+
+        custom = st.name, st.latitude_deg, st.longitude_deg
+
+        def apply_preset() -> None:
+            nonlocal custom
+            preset = preset_combo.currentData()
+            if preset is not None:
+                if not name_edit.isReadOnly():
+                    custom = name_edit.text(), latitude.value(), longitude.value()
+                values = preset_combo.currentText(), preset.lat, preset.lon
+            else:
+                values = custom
+            name, lat, lon = values
+            name_edit.setText(name)
+            name_edit.setReadOnly(preset is not None)
+            coordinates.setEnabled(preset is None)
+            latitude.set_value(lat)
+            longitude.set_value(lon)
+
+        preset_combo.currentIndexChanged.connect(apply_preset)
+        for i in range(1, preset_combo.count()):
+            preset = preset_combo.itemData(i)
+            if (
+                st.name == preset_combo.itemText(i)
+                and isclose(st.latitude_deg, preset.lat, abs_tol=5e-7)
+                and isclose(st.longitude_deg, preset.lon, abs_tol=5e-7)
+            ):
+                preset_combo.setCurrentIndex(i)
+                break
 
         min_el = _spin(0.0, 90.0, st.min_elevation_deg, 2)
         gso = _spin(0.0, 180.0, st.gso_avoid_deg, 2)
-        form.addWidget(self._field("最低仰角（°）", min_el), 2, 0)
-        form.addWidget(self._field("GSO 隔离角（°）", gso), 2, 1)
+        form.addWidget(self._field("最低仰角（°）", min_el), 3, 0)
+        form.addWidget(self._field("GSO 隔离角（°）", gso), 3, 1)
 
         setattr(self, f"_loc{index}", {
-            "name": name_edit, "mode": mode_combo, "stack": stacked,
-            "lat_dec": lat_dec, "lon_dec": lon_dec,
-            "lat_deg": lat_deg, "lat_min": lat_min, "lat_sec": lat_sec,
-            "lon_deg": lon_deg, "lon_min": lon_min, "lon_sec": lon_sec,
+            "name": name_edit, "preset": preset_combo, "mode": mode_combo,
+            "latitude": latitude, "longitude": longitude,
             "min_el": min_el, "gso": gso,
         })
         return card
@@ -636,16 +657,11 @@ class LinkVisibilityPage(QWidget):
     def _read_loc(self, index: int) -> LinkStationConfig:
         loc = getattr(self, f"_loc{index}")
         st = self._config.stations[index]
-        if loc["mode"].currentData() == "decimal":
-            lat = loc["lat_dec"].value()
-            lon = loc["lon_dec"].value()
-        else:
-            lat = loc["lat_deg"].value() + loc["lat_min"].value() / 60.0 + loc["lat_sec"].value() / 3600.0
-            lon = loc["lon_deg"].value() + loc["lon_min"].value() / 60.0 + loc["lon_sec"].value() / 3600.0
+        preset = loc["preset"].currentData()
         return LinkStationConfig(
             name=loc["name"].text().strip() or st.name,
-            latitude_deg=lat,
-            longitude_deg=lon,
+            latitude_deg=preset.lat if preset else loc["latitude"].value(),
+            longitude_deg=preset.lon if preset else loc["longitude"].value(),
             altitude_m=st.altitude_m,
             min_elevation_deg=loc["min_el"].value(),
             gso_avoid_deg=loc["gso"].value(),
@@ -927,18 +943,3 @@ def _spin(minimum: float, maximum: float, value: float, decimals: int):
     return box
 
 
-def _int_spin(minimum: int, maximum: int, value: int):
-    box = QSpinBox()
-    box.setRange(minimum, maximum)
-    box.setValue(value)
-    return box
-
-
-def _three(a, b, c) -> QWidget:
-    widget = QWidget()
-    layout = QHBoxLayout(widget)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(a)
-    layout.addWidget(b)
-    layout.addWidget(c)
-    return widget
